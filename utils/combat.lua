@@ -36,51 +36,97 @@ function Combat.CombatSettled(thresholdMs)
     return (Globals.GetTimeMS() - Globals.LastCombatTime) >= thresholdMs
 end
 
---- Designates the main assist from the assist list, raid, group, or self as a fallback.
+--- Commits a resolved main-assist spawn to Globals, logging only when the MA changes.
+---@param assistSpawn spawn The spawn to set as the main assist.
+---@param fromAssistList boolean True if this assist came from the user-defined Assist List.
+local function commitMainAssist(assistSpawn, fromAssistList)
+    local assistName = assistSpawn.CleanName()
+    if assistSpawn.ID() ~= Core.GetMainAssistId() then
+        Logger.log_info("SetMainAssist: Setting new assist to %s [%d]", assistName, assistSpawn.ID())
+        Globals.MainAssist = assistName or ""
+    end
+    -- Keep Assist List MAs on our extended target list so we can read their health/target promptly.
+    if fromAssistList and assistName ~= mq.TLO.Me.CleanName() then
+        Targeting.AddXTByName(2, assistName)
+    end
+end
+
+--- Resolvers for each assist source. Each returns a valid (alive) MA spawn or nil.
+--- Keyed by the source name stored in the AssistSourceOrder setting.
+Combat.AssistSourceResolvers = {
+    -- User-defined Assist List: first alive PC on the list wins.
+    ['AssistList'] = function()
+        for _, name in ipairs(Config:GetSetting('AssistList')) do
+            Logger.log_verbose("SetMainAssist: Checking Assist List: %s", name)
+            local listAssistSpawn = mq.TLO.Spawn(string.format("PC =%s", name))
+            if listAssistSpawn() and not listAssistSpawn.Dead() then
+                return listAssistSpawn
+            end
+        end
+        return nil
+    end,
+    -- EQ raid Main Assist (slot chosen by RaidAssistTarget). Only valid while in a raid.
+    ['Raid'] = function()
+        if mq.TLO.Raid.Members() == 0 then return nil end
+        Logger.log_verbose("SetMainAssist: Checking Raid Assist.")
+        local raidAssistSpawn = mq.TLO.Raid.MainAssist(Config:GetSetting('RaidAssistTarget'))
+        if raidAssistSpawn() and raidAssistSpawn.ID() > 0 and not raidAssistSpawn.Dead() then
+            return raidAssistSpawn
+        end
+        return nil
+    end,
+    -- EQ group Main Assist. Valid whenever we're in a group (including a group within a raid).
+    ['Group'] = function()
+        if not mq.TLO.Group() then return nil end
+        Logger.log_verbose("SetMainAssist: Checking Group Assist.")
+        local groupAssistSpawn = mq.TLO.Group.MainAssist
+        if groupAssistSpawn() and groupAssistSpawn.ID() > 0 and not groupAssistSpawn.Dead() then
+            return groupAssistSpawn
+        end
+        return nil
+    end,
+}
+
+--- Maps each assist source to the setting that enables it.
+Combat.AssistSourceEnable = {
+    ['AssistList'] = 'UseAssistList',
+    ['Raid']       = 'UseRaidAssist',
+    ['Group']      = 'UseGroupAssist',
+}
+
+--- Designates the main assist by walking the user-defined source priority order
+--- (Assist List / Raid / Group), then falling back to self if configured.
 function Combat.SetMainAssist()
     local inRaid = mq.TLO.Raid.Members() > 0
     local inGroup = mq.TLO.Raid.Members() == 0 and mq.TLO.Group()
 
-    if Config:GetSetting('UseAssistList') then
-        if #Config:GetSetting('AssistList') > 0 then
-            Logger.log_verbose("SetMainAssist: Checking Assist List.")
-            for _, name in ipairs(Config:GetSetting('AssistList')) do
-                Logger.log_verbose("SetMainAssist: Checking Assist List: %s", name)
-                local listAssistSpawn = mq.TLO.Spawn(string.format("PC =%s", name))
-                if listAssistSpawn() and not listAssistSpawn.Dead() then
-                    local assistName = listAssistSpawn.CleanName()
-                    if listAssistSpawn.ID() ~= Core.GetMainAssistId() then
-                        Logger.log_info("SetMainAssist: Setting new assist to %s [%d]", assistName, listAssistSpawn.ID())
-                        Globals.MainAssist = assistName or ""
-                    end
-                    if assistName ~= mq.TLO.Me.CleanName() then
-                        Targeting.AddXTByName(2, assistName)
-                    end
-                    return
-                end
-            end
-        end
-    elseif inRaid then
-        Logger.log_verbose("SetMainAssist: Checking Raid Assist.")
-        local raidAssistSpawn = mq.TLO.Raid.MainAssist(Config:GetSetting('RaidAssistTarget'))
-        if raidAssistSpawn() and raidAssistSpawn.ID() > 0 and not raidAssistSpawn.Dead() then
-            if raidAssistSpawn.ID() ~= Core.GetMainAssistId() then
-                Logger.log_info("SetMainAssist: Setting new assist to %s [%d]", raidAssistSpawn.CleanName(), raidAssistSpawn.ID())
-                Globals.MainAssist = raidAssistSpawn.CleanName() or ""
-            end
+    -- A manual assist override (/rgl assist <name>) takes precedence over the priority list while set.
+    -- If the named PC isn't currently available we fall through to the normal chain but keep the
+    -- override set, so assisting resumes automatically when they return. Clear with /rgl assist off.
+    local override = Globals.AssistOverride or ""
+    if override ~= "" then
+        local overrideSpawn = mq.TLO.Spawn(string.format("PC =%s", override))
+        if overrideSpawn() and not overrideSpawn.Dead() then
+            commitMainAssist(overrideSpawn, override:lower() ~= (mq.TLO.Me.CleanName() or ""):lower())
             return
         end
-    elseif inGroup then
-        Logger.log_verbose("SetMainAssist: Checking Group Assist.")
-        local groupAssistSpawn = mq.TLO.Group.MainAssist
-        if groupAssistSpawn() and groupAssistSpawn.ID() > 0 and not groupAssistSpawn.Dead() then
-            if groupAssistSpawn.ID() ~= Core.GetMainAssistId() then
-                Logger.log_info("SetMainAssist: Setting new assist to %s [%d]", groupAssistSpawn.CleanName(), groupAssistSpawn.ID())
-                Globals.MainAssist = groupAssistSpawn.CleanName() or ""
+    end
+
+    -- Walk the configured priority order; the first enabled source with a valid MA wins.
+    for _, source in ipairs(Config:GetSetting('AssistSourceOrder') or {}) do
+        local enableSetting = Combat.AssistSourceEnable[source]
+        local resolver = Combat.AssistSourceResolvers[source]
+        if resolver and (not enableSetting or Config:GetSetting(enableSetting)) then
+            local assistSpawn = resolver()
+            if assistSpawn then
+                commitMainAssist(assistSpawn, source == 'AssistList')
+                return
             end
-            return
         end
-    else
+    end
+
+    -- Solo (no group/raid) and not using the Assist List: we're always our own MA.
+    if not inRaid and not inGroup and not Config:GetSetting('UseAssistList') then
         Combat.SetMAToSelf()
         return
     end
@@ -117,7 +163,7 @@ function Combat.EngageTarget(autoTargetId)
 
     Logger.log_verbose("\awNOTICE:\ax EngageTarget(%s) Checking for valid Target.", Targeting.GetTargetCleanName())
 
-    if target() and (target.ID() or 0) == autoTargetId and Targeting.GetTargetDistance() <= Config:GetSetting('AssistRange') then
+    if target() and (target.ID() or 0) == autoTargetId and ((Globals.ForceAssistRange and Globals.ForceTargetID > 0) or Targeting.GetTargetDistance() <= Config:GetSetting('AssistRange')) then
         if (Targeting.GetTargetPctHPs() <= Config:GetSetting('AutoAssistAt') or Core.IAmMA()) and not Targeting.GetTargetDead(target) then
             if not mq.TLO.Me.Combat() then
                 Core.SafeCallClassHelper("PreEngage", "PreEngage", target)
@@ -825,7 +871,7 @@ function Combat.OkToEngagePreValidateId(targetId)
             Logger.log_verbose("OkToEngagePrevalidate check for %s(ID: %d) - I am MA but target beyond AssistRange.", targetName, targetId)
             return false
         else -- can't check HP yet, as we haven't targeted
-            local distanceCheck = Targeting.GetTargetDistance(target) < Config:GetSetting('AssistRange')
+            local distanceCheck = (Globals.ForceAssistRange and Globals.ForceTargetID > 0) or Targeting.GetTargetDistance(target) < Config:GetSetting('AssistRange')
             local hostileCheck = Config:GetSetting('TargetNonAggressives') or target.Aggressive()
             local forcedTarget = Globals.ForceTargetID > 0 and target.ID() == Globals.ForceTargetID
             local forcedCombat = Globals.ForceCombatID > 0 and targetId == Globals.ForceCombatID
@@ -912,7 +958,7 @@ function Combat.OkToEngage(autoTargetId)
             Logger.log_verbose("OkToEngage check for %s(ID: %d) - I am MA but target beyond AssistRange.", targetName, targetId)
             return false
         else
-            local distanceCheck = Targeting.GetTargetDistance() < Config:GetSetting('AssistRange')
+            local distanceCheck = (Globals.ForceAssistRange and Globals.ForceTargetID > 0) or Targeting.GetTargetDistance() < Config:GetSetting('AssistRange')
             local assistHPCheck = Targeting.GetTargetPctHPs() <= Config:GetSetting('AutoAssistAt')
             local hostileCheck = Config:GetSetting('TargetNonAggressives') or target.Aggressive()
             local forcedTarget = Globals.ForceTargetID > 0 and targetId == Globals.ForceTargetID
