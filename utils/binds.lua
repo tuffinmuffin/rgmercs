@@ -467,6 +467,59 @@ Binds.Handlers    = {
             doCallAssist(raid, true)
         end,
     },
+    ['buff'] = {
+        usage = "/rgl buff <setName> [all|<group#>]",
+        about =
+        "Cast a saved Buffs set on the whole raid ('all', the default) or only on a specific group number. Set names with spaces are not supported - use a single-word set name.",
+        handler = function(setName, scope)
+            if not setName or setName == "" then
+                Logger.log_error("/rgl buff - no set name given! Use /rgl buff <setName> [all|<group#>].")
+                return
+            end
+            local scopeArg = (scope and scope:lower() ~= "all") and scope or "all"
+            Modules:ExecModule("Buffs", "CastSet", setName, scopeArg)
+        end,
+    },
+    ['buffgroup'] = {
+        usage = "/rgl buffgroup <group#>",
+        about = "Cast all currently-checked group buffs onto a single raid group number.",
+        handler = function(groupNum)
+            local n = tonumber(groupNum)
+            if not n then
+                Logger.log_error("/rgl buffgroup - a numeric group number is required! Use /rgl buffgroup <group#>.")
+                return
+            end
+            Modules:ExecModule("Buffs", "CastGroupNum", n)
+        end,
+    },
+    ['buffstop'] = {
+        usage = "/rgl buffstop",
+        about = "Stop and clear the Buffs cast queue.",
+        handler = function()
+            Modules:ExecModule("Buffs", "BuffStop")
+        end,
+    },
+    ['buffnow'] = {
+        usage = "/rgl buffnow [all|<group#>]",
+        about = "Cast all currently-checked buffs now (without saving a set). 'all' (default) buffs every group; a number scopes group buffs to that group.",
+        handler = function(scope)
+            local scopeArg = (scope and scope:lower() ~= "all") and scope or "all"
+            Modules:ExecModule("Buffs", "CastChecked", scopeArg)
+        end,
+    },
+    ['buffadd'] = {
+        usage = "/rgl buffadd <Spell Name>",
+        about = "Add a buff by name to the Buffs catalog (e.g. a buff outside the normal cycle). If no name is given, your currently-memorized spell name is used.",
+        handler = function(...)
+            local name = table.concat({ ..., }, " ")
+            if name == "" then name = mq.TLO.Spell.Name() end
+            if not name or name == "" then
+                Logger.log_error("/rgl buffadd - no spell name given! Use /rgl buffadd <Spell Name>.")
+                return
+            end
+            Modules:ExecModule("Buffs", "AddUserSpell", name)
+        end,
+    },
     ['forceassistrange'] = {
         usage = "/rgl forceassistrange <on|off>",
         about =
