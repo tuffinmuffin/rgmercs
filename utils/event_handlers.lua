@@ -419,8 +419,10 @@ mq.event('Stunned2', "You are stunned#*#", function()
     Casting.SetLastCastResult(Globals.Constants.CastResults.CAST_STUNNED)
 end)
 
-mq.event('TakeHold1', "Your #*# did not take hold on #*#. (Blocked by #*#.)", function()
+mq.event('TakeHold1', "Your #*# did not take hold on #*#. (Blocked by #*#.)", function(_, _, _, blocker)
     Casting.SetLastCastResult(Globals.Constants.CastResults.CAST_TAKEHOLD)
+    -- Remember WHAT blocked us so the buff routine can skip this spell on this target until the blocker fades.
+    Globals.LastBlocker = blocker or ""
 end)
 
 mq.event('TakeHold2', "Your spell did not take hold#*#", function()
