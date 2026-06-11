@@ -21,6 +21,12 @@ Casting.Memorizing = false
 -- cached for UI display
 Casting.UseGem     = mq.TLO.Me.NumGems()
 
+-- Memory of buffs that failed to land with "did not take hold (Blocked by X)".
+-- Keyed "spellId:targetId" -> { blocker = name, recordedAt = sec, nextCheck = sec }.
+-- Without this, .Stacks() keeps reporting the buff would land (it ignores the
+-- server-side block table), so the routine re-casts a blocked buff forever.
+Casting.BlockedBuffs = {}
+
 --- Checks if a spell target type is a group-affecting type (group buffs, AE PC buffs, etc.)
 --- @param targetType string|nil The TargetType() value from a spell.
 --- @return boolean
@@ -285,6 +291,13 @@ function Casting.ResolveBuffCheck(spellId, target, skipBlockCheck, skipTriggerCh
     if not (target and target()) then return false end
 
     local spell = mq.TLO.Spell(spellId)
+
+    -- Skip buffs we already know are blocked by a higher buff on this target (.Stacks() can't see the block).
+    if not skipBlockCheck and Casting.IsBuffBlocked(spellId, target) then
+        Logger.log_verbose("ResolveBuffCheck: %s(ID:%d) is block-listed on %s(ID:%d) (failed take-hold), skipping.",
+            spell.Name() or "?", spellId, target.DisplayName() or "?", target.ID())
+        return false
+    end
 
     if target.ID() == mq.TLO.Me.ID() then
         Logger.log_verbose("ResolveBuffCheck: Target is myself, using LocalBuffCheck.")
@@ -1863,6 +1876,11 @@ function Casting.UseSpell(spellName, targetId, bAllowMem, bAllowDead, retryCount
     })
     if Globals.StopCast then return false end
 
+    -- If the server blocked this buff (higher buff already present), remember it so we stop re-casting forever.
+    if Globals.CastResult == Globals.Constants.CastResults.CAST_TAKEHOLD and Globals.LastBlocker ~= "" then
+        Casting.RecordBlockedBuff(spell.ID(), targetId, Globals.LastBlocker)
+    end
+
     Globals.LastUsedSpell = spellName
     if mq.TLO.Target.ID() ~= oldTargetId and Combat.ValidCombatTarget(oldTargetId) and (oldTargetId == Globals.AutoTargetID or not Config:GetSetting('DoAutoTarget')) then
         Logger.log_debug("UseSpell(): Retargeting previous target after spell use.")
@@ -2051,6 +2069,11 @@ function Casting.UseSong(songName, targetId, bAllowMem, retryCount)
     Core.SafeCallClassHelper("SwapInst", "SwapInst", "Weapon")
 
     if cancel then return false end -- don't try to retarget if we broke out above, but we still needed to swap equipment back.
+
+    -- If the server blocked this song (higher buff already present), remember it so we stop re-singing forever.
+    if Globals.CastResult == Globals.Constants.CastResults.CAST_TAKEHOLD and Globals.LastBlocker ~= "" then
+        Casting.RecordBlockedBuff(songSpell.ID(), targetId, Globals.LastBlocker)
+    end
 
     if mq.TLO.Target.ID() ~= oldTargetId and Combat.ValidCombatTarget(oldTargetId) and (oldTargetId == Globals.AutoTargetID or not Config:GetSetting('DoAutoTarget')) then
         Logger.log_debug("\ayUseSong(): Retargeting previous target after song use.")
@@ -2589,11 +2612,101 @@ function Casting.GetLastCastResultId()
     return Globals.CastResult
 end
 
+local BLOCKED_RECHECK_SECS = 15  -- how often to re-verify the blocker is still present
+local BLOCKED_MAX_AGE_SECS = 300 -- hard expiry when we can't read the target's buffs at all
+
+--- Best-effort check for whether buff `blocker` is currently on `target`.
+--- @param blocker string The name of the blocking buff (e.g. "Heroism").
+--- @param target MQSpawn|MQTarget|MQCharacter The target to inspect.
+--- @return boolean present True if the blocker buff is on the target.
+--- @return boolean known False if we couldn't determine presence (caller should fall back to a timeout).
+function Casting.BlockerPresence(blocker, target)
+    if not blocker or blocker == "" then return false, false end
+    if not (target and target()) then return false, false end
+    local tid = target.ID()
+
+    if tid == mq.TLO.Me.ID() then
+        return mq.TLO.Me.FindBuff("name " .. blocker)() ~= nil, true
+    end
+    if tid == mq.TLO.Target.ID() then
+        return mq.TLO.Target.FindBuff("name " .. blocker)() ~= nil, true
+    end
+
+    -- DanNet peer: ask them directly whether they still have the blocker.
+    local peerName = mq.TLO.Spawn(tid).CleanName()
+    if peerName and mq.TLO.DanNet(peerName)() then
+        local res = DanNet.query(peerName, string.format("Me.Buff[%s].ID", blocker), 1000)
+        if res ~= nil then
+            return (tonumber(res) or 0) > 0, true
+        end
+    end
+
+    return false, false
+end
+
+--- Records that `spellId` failed to land on `targetId` because of buff `blocker`,
+--- so the buff routine stops re-casting it until the blocker is gone.
+--- @param spellId integer The blocked spell's ID.
+--- @param targetId integer The spawn ID it failed to land on.
+--- @param blocker string The name of the blocking buff.
+function Casting.RecordBlockedBuff(spellId, targetId, blocker)
+    if not spellId or not targetId or targetId == 0 then return end
+    local now = Globals.GetTimeSeconds()
+    Casting.BlockedBuffs[string.format("%d:%d", spellId, targetId)] = {
+        blocker = blocker or "",
+        recordedAt = now,
+        nextCheck = now + BLOCKED_RECHECK_SECS,
+    }
+    Logger.log_info("\ay[BlockedBuff]\ax %s blocked on \ag%s\ax by '\ao%s\ax' - skipping until the blocker fades.",
+        mq.TLO.Spell(spellId).Name() or "?", mq.TLO.Spawn(targetId).CleanName() or ("ID:" .. targetId), blocker or "?")
+end
+
+--- Returns true if `spellId` should currently be skipped on `target` because it
+--- previously failed to take hold and the blocker is (still) present. Clears the
+--- entry once the blocker fades (or after a hard timeout when buffs can't be read).
+--- @param spellId integer The spell ID to check.
+--- @param target MQSpawn|MQTarget|MQCharacter The target to check.
+--- @return boolean True if the buff is currently block-listed for this target.
+function Casting.IsBuffBlocked(spellId, target)
+    if not spellId or not (target and target()) then return false end
+    local key = string.format("%d:%d", spellId, target.ID())
+    local e = Casting.BlockedBuffs[key]
+    if not e then return false end
+
+    local now = Globals.GetTimeSeconds()
+    -- Throttle re-verification so we don't spam DanNet queries every tick.
+    if now < e.nextCheck then return true end
+
+    local present, known = Casting.BlockerPresence(e.blocker, target)
+    if known then
+        if present then
+            e.nextCheck = now + BLOCKED_RECHECK_SECS
+            return true
+        end
+        Casting.BlockedBuffs[key] = nil -- blocker is gone -> allow the re-buff
+        Logger.log_info("\ay[BlockedBuff]\ax blocker '\ao%s\ax' gone from \ag%s\ax - %s may be re-applied.",
+            e.blocker, target.DisplayName() or ("ID:" .. target.ID()), mq.TLO.Spell(spellId).Name() or "?")
+        return false
+    end
+
+    -- Couldn't read the target's buffs; fall back to a hard max age before retrying.
+    if now - e.recordedAt < BLOCKED_MAX_AGE_SECS then
+        e.nextCheck = now + BLOCKED_RECHECK_SECS
+        return true
+    end
+    Casting.BlockedBuffs[key] = nil
+    return false
+end
+
 --- Sets the result of the last cast operation.
 --- @param result number The result to be set for the last cast operation.
 function Casting.SetLastCastResult(result)
     Logger.log_debug("\awSet Last Cast Result => \ag%s", Globals.Constants.CastResultsIdToName[result])
     Globals.CastResult = result
+    -- A fresh cast attempt clears any stale blocker captured from a previous failure.
+    if result == Globals.Constants.CastResults.CAST_RESULT_NONE then
+        Globals.LastBlocker = ""
+    end
 end
 
 --- Retrieves the last used spell.

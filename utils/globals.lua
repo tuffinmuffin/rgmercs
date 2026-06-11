@@ -12,10 +12,12 @@ Globals.Comms                         = nil
 Globals.Config                        = nil
 
 Globals.MainAssist                    = ""
+Globals.AssistOverride                = "" -- manual /rgl assist <name> override; takes precedence over the assist priority list while set
 Globals.ScriptDir                     = ""
 Globals.AutoTargetID                  = 0
 Globals.AggroTargetID                 = 0
 Globals.ForceTargetID                 = 0
+Globals.ForceAssistRange              = false -- when true, ignore the AssistRange distance gate (set by /rgl callassist now); auto-clears when the force target clears
 Globals.AutoTargetIsNamed                  = false
 Globals.AutoTargetElementalImmunities      = {}
 Globals.AutoTargetStatusImmunities         = {}
@@ -42,6 +44,7 @@ Globals.BuildType                     = mq.TLO.MacroQuest.BuildName()
 Globals.ServerEnv                     = (Globals.BuildType:lower() == "emu") and Globals.CurServer or "Live"
 Globals.Minimized                     = false
 Globals.LastUsedSpell                 = "None"
+Globals.LastBlocker                   = "" -- name of the buff that last caused a "did not take hold (Blocked by X)" failure
 Globals.CorpseConned                  = false
 Globals.RezzedCorpses                 = {}
 Globals.LastCachedBuffUpdate          = {}
@@ -308,6 +311,10 @@ end
 ---@param targetId number? Spawn ID to force-target; 0 or nil to clear.
 function Globals.SetForcedTargetId(targetId)
     if targetId == Globals.ForceTargetID then return end
+
+    -- A range-break (/rgl callassist now) is scoped to a single forced target: any change of force
+    -- target (including clearing it when the mob dies) ends it. It must be re-asserted afterward.
+    Globals.ForceAssistRange = false
 
     local startingId = Globals.ForceTargetID
     if targetId and targetId > 0 then
