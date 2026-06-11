@@ -23,12 +23,23 @@ Module.__index = Module
 Module.__index = Module
 setmetatable(Module, { __index = Base, })
 Module.FAQ                           = {}
-Module.CommandHandlers               = {}
+Module.CommandHandlers               = {
+	charmignore = {
+		usage = "/rgl charmignore [spawnID]",
+		about = "Add the current target (or a supplied spawn ID) to the persistent charm-ignore list for this zone.",
+		handler = function(self, params)
+			local id = (params and #tostring(params) > 0 and tonumber(params)) or mq.TLO.Target.ID()
+			self:ManualIgnore(id)
+		end,
+	},
+}
 
 Module.CombatState                   = "None"
 Module.TempSettings                  = {}
 Module.TempSettings.CharmImmune      = {}
 Module.TempSettings.CharmTracker     = {}
+Module.TempSettings.LastCharmId      = 0
+Module.TempSettings.CharmBreakTime   = 0
 Module.TempSettings.ImmuneModuleName = "Charm.Immune"
 Module.ImmuneTable                   = {}
 
@@ -85,6 +96,17 @@ Module.DefaultConfig                 = {
 		Min         = 1,
 		Max         = 200,
 		Tooltip     = "The maximum height difference between the potential charm target and the PC.",
+	},
+	['RecharmStickySecs']                      = {
+		DisplayName = "Recharm Sticky Secs",
+		Group       = "Abilities",
+		Header      = "Charm",
+		Category    = "Charm General",
+		Index       = 6,
+		Default     = 3,
+		Min         = 0,
+		Max         = 15,
+		Tooltip     = "After a charm breaks, prefer recharming the SAME mob, holding out up to this many seconds for it to return before charming a different one. 0 = soft preference (try the same mob first, but never wait).",
 	},
 	-- Targets
 	['CharmStopHPs']                           = {
@@ -199,11 +221,12 @@ function Module:Render()
 		-- CCEd targets
 		if ImGui.CollapsingHeader("Charm Target List") then
 			ImGui.Indent()
-			if ImGui.BeginTable("CharmedList", 4, bit32.bor(ImGuiTableFlags.None, ImGuiTableFlags.Borders, ImGuiTableFlags.Reorderable, ImGuiTableFlags.Resizable, ImGuiTableFlags.Hideable)) then
+			if ImGui.BeginTable("CharmedList", 5, bit32.bor(ImGuiTableFlags.None, ImGuiTableFlags.Borders, ImGuiTableFlags.Reorderable, ImGuiTableFlags.Resizable, ImGuiTableFlags.Hideable)) then
 				ImGui.TableSetupColumn('Id', (ImGuiTableColumnFlags.WidthFixed), 70.0)
 				ImGui.TableSetupColumn('Name', (ImGuiTableColumnFlags.WidthFixed), 250.0)
 				ImGui.TableSetupColumn('Level', (ImGuiTableColumnFlags.WidthFixed), 150.0)
 				ImGui.TableSetupColumn('Body', (ImGuiTableColumnFlags.WidthStretch), 150.0)
+				ImGui.TableSetupColumn('Ignore', (ImGuiTableColumnFlags.WidthFixed), 60.0)
 				ImGui.TableHeadersRow()
 				for id, data in pairs(self.TempSettings.CharmTracker) do
 					ImGui.TableNextColumn()
@@ -214,6 +237,11 @@ function Module:Render()
 					ImGui.Text(data.level)
 					ImGui.TableNextColumn()
 					ImGui.Text(data.body)
+					ImGui.TableNextColumn()
+					if ImGui.SmallButton(Icons.MD_NOT_INTERESTED .. "##charmignore" .. tostring(id)) then
+						self:ManualIgnore(id)
+					end
+					Ui.Tooltip("Add this mob to the charm-ignore list for this zone.")
 				end
 				ImGui.EndTable()
 			end
@@ -224,6 +252,10 @@ function Module:Render()
 		-- Immune targets
 		if ImGui.CollapsingHeader("Invalid Charm Targets") then
 			ImGui.Indent()
+			if ImGui.SmallButton(Icons.MD_NOT_INTERESTED .. " Ignore Current Target") then
+				self:ManualIgnore(mq.TLO.Target.ID())
+			end
+			Ui.Tooltip("Add your current target to the persistent charm-ignore list for this zone.")
 			if ImGui.BeginTable("Immune", 5, bit32.bor(ImGuiTableFlags.None, ImGuiTableFlags.Borders, ImGuiTableFlags.Reorderable, ImGuiTableFlags.Resizable, ImGuiTableFlags.Hideable)) then
 				ImGui.TableSetupColumn('Id', (ImGuiTableColumnFlags.WidthFixed), 70.0)
 				ImGui.TableSetupColumn('Name', (ImGuiTableColumnFlags.WidthStretch), 250.0)
@@ -299,6 +331,28 @@ function Module:AddImmuneTarget(mobId, mobData)
 	end
 end
 
+function Module:ManualIgnore(mobId)
+	mobId = tonumber(mobId) or 0
+	if mobId <= 0 then
+		Logger.log_error("\arCharm Ignore:\ax requires a valid target or a supplied spawn ID.")
+		return
+	end
+	local spawn = mq.TLO.Spawn(mobId)
+	if not spawn or not spawn() or (spawn.ID() or 0) <= 0 then
+		Logger.log_error("\arCharm Ignore:\ax spawn %d not found.", mobId)
+		return
+	end
+	self:AddImmuneTarget(mobId, {
+		id     = spawn.ID(),
+		name   = spawn.CleanName() or "Unknown",
+		lvl    = spawn.Level() or 0,
+		body   = spawn.Body() or "Unknown",
+		reason = "Manual",
+	})
+	Logger.log_info("\agCharm Ignore:\ax added \at%s\ax (ID %d, Lvl %s) to the charm-ignore list for this zone.",
+		spawn.CleanName() or "Unknown", mobId, tostring(spawn.Level() or 0))
+end
+
 function Module:CharmLvlToHigh(mobLvl)
 	if Core.MyClassIs("BRD") then return false end
 	if Config:GetSetting("DireCharm", true) and Config:GetSetting("AutoLevelRangeCharm") then
@@ -340,6 +394,8 @@ end
 function Module:ResetCharmStates()
 	self.TempSettings.CharmImmune = {}
 	self.TempSettings.CharmTracker = {}
+	self.TempSettings.LastCharmId = 0
+	self.TempSettings.CharmBreakTime = 0
 end
 
 function Module:GetCharmSpell()
@@ -576,8 +632,40 @@ function Module:ProcessCharmList()
 		return
 	end
 
+	-- Sticky recharm: prefer the mob we most recently had charmed, and (optionally)
+	-- hold out briefly for it to return before settling for a different mob.
+	local lastId = self.TempSettings.LastCharmId or 0
+	local inGrace = false
+	if lastId > 0 then
+		local lastSpawn = mq.TLO.Spawn(lastId)
+		local lastAlive = lastSpawn and lastSpawn() and (lastSpawn.ID() or 0) > 0
+			and not lastSpawn.Dead() and not Targeting.TargetIsType("corpse", lastSpawn)
+		if not lastAlive then
+			-- original pet is gone for good; drop stickiness
+			self.TempSettings.LastCharmId = 0
+			self.TempSettings.CharmBreakTime = 0
+			lastId = 0
+		else
+			local graceSecs = Config:GetSetting('RecharmStickySecs') or 0
+			local breakTime = self.TempSettings.CharmBreakTime or 0
+			if graceSecs > 0 and breakTime > 0 then
+				inGrace = (Globals.GetTimeMS() - breakTime) < (graceSecs * 1000)
+			end
+		end
+	end
+
+	-- Build processing order: last charmed mob first, then everyone else.
+	local orderedIds = {}
+	if lastId > 0 and self.TempSettings.CharmTracker[lastId] ~= nil then
+		table.insert(orderedIds, lastId)
+	end
+	for id in pairs(self.TempSettings.CharmTracker) do
+		if id ~= lastId then table.insert(orderedIds, id) end
+	end
+
 	local removeList = {}
-	for id, data in pairs(self.TempSettings.CharmTracker) do
+	for _, id in ipairs(orderedIds) do
+		local data = self.TempSettings.CharmTracker[id]
 		if mq.TLO.Pet.ID() > 0 then break end
 		local spawn = mq.TLO.Spawn(id)
 		Logger.log_debug("\ayProcessCharmList(%d) :: Checking...", id)
@@ -598,6 +686,8 @@ function Module:ProcessCharmList()
 					if id == Globals.AutoTargetID then
 						Logger.log_debug("\ayProcessCharmList(%d) :: Mob is MA's target skipping", id)
 						table.insert(removeList, id)
+					elseif inGrace and id ~= lastId then
+						Logger.log_debug("\ayProcessCharmList(%d) :: Sticky recharm active - holding for last pet %d, skipping.", id, lastId)
 					else
 						Logger.log_debug("\ayProcessCharmList(%d) :: Mob needs charmed.", id)
 						if mq.TLO.Me.Combat() or mq.TLO.Me.Casting() then
@@ -641,6 +731,14 @@ end
 function Module:DoCharm()
 	local charmSpell = self:GetCharmSpell()
 	self:UpdateTimings()
+
+	-- Track current pet for sticky recharm; record when the charm breaks.
+	if mq.TLO.Me.Pet.ID() > 0 then
+		self.TempSettings.LastCharmId = mq.TLO.Me.Pet.ID()
+		self.TempSettings.CharmBreakTime = 0
+	elseif (self.TempSettings.LastCharmId or 0) > 0 and (self.TempSettings.CharmBreakTime or 0) == 0 then
+		self.TempSettings.CharmBreakTime = Globals.GetTimeMS()
+	end
 
 	if Targeting.GetXTHaterCount() >= Config:GetSetting('CharmStartCount') then
 		self:UpdateCharmList()
