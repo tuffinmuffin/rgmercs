@@ -549,7 +549,7 @@ local _ClassConfig    = {
             "Compel",               -- Level 68
             "Command of Druzzil",   -- Level 64
             "Beckon",               -- Level 62
-            "Dictate",              -- Level 60
+            -- "Dictate",              -- Level 60 (do not use)
             "Boltran's Agacerie",   -- Level 53
             "Ordinance",            -- Level 52
             "Allure",               -- Level 46
