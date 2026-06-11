@@ -95,6 +95,12 @@ function StandardUI:renderModulesTabs()
 
             ImGui.NewLine()
 
+            if ImGui.CollapsingHeader("Assist Priority") then
+                ImGui.Indent()
+                Ui.RenderAssistSources()
+                ImGui.Unindent()
+            end
+
             if ImGui.CollapsingHeader("Assist List") then
                 ImGui.Indent()
                 Ui.RenderList("AssistList", true)

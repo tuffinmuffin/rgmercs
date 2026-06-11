@@ -113,6 +113,11 @@ Config.DefaultConfig                                     = {
         Type = "Custom",
         Default = {},
     },
+    ['AssistSourceOrder']          = {
+        DisplayName = "Assist Source Priority Order",
+        Type = "Custom",
+        Default = { "AssistList", "Raid", "Group", },
+    },
     ['HealList']                   = {
         DisplayName = "List of User-Defined Heal Targets",
         Type = "Custom",
@@ -980,15 +985,33 @@ Config.DefaultConfig                                     = {
         Header = "Assisting",
         Category = "Assisting",
         Index = 10,
-        Tooltip = "Use names from the Assist List to choose a Main Assist instead of assisting the EQ group or raid assist (see FAQs).",
+        Tooltip = "Use names from the Assist List to choose a Main Assist instead of assisting the EQ group or raid assist (see FAQs).\nThis enables the Assist List as an assist source; its position relative to Raid and Group assist is set by the Assist Source Priority list on the main window.",
         Default = false,
+    },
+    ['UseRaidAssist']              = {
+        DisplayName = "Use Raid Assist",
+        Group = "Combat",
+        Header = "Assisting",
+        Category = "Assisting",
+        Index = 11,
+        Tooltip = "Enable the Raid Assist (Main Assist) as an assist source. Disable to ignore the raid assist even while in a raid.\nIts position relative to the Assist List and Group assist is set by the Assist Source Priority list on the main window.",
+        Default = true,
+    },
+    ['UseGroupAssist']             = {
+        DisplayName = "Use Group Assist",
+        Group = "Combat",
+        Header = "Assisting",
+        Category = "Assisting",
+        Index = 12,
+        Tooltip = "Enable the Group Main Assist as an assist source. Disable to ignore the group assist.\nIts position relative to the Assist List and Raid assist is set by the Assist Source Priority list on the main window.",
+        Default = true,
     },
     ['RaidAssistTarget']           = {
         DisplayName = "Raid Assist Target",
         Group = "Combat",
         Header = "Assisting",
         Category = "Assisting",
-        Index = 11,
+        Index = 13,
         Tooltip = "Which Raid Assist target to follow. Please note that we will not fallback if this is not set properly.",
         Type = "Combo",
         ComboOptions = { 'First', 'Second', 'Third', },
@@ -1002,7 +1025,7 @@ Config.DefaultConfig                                     = {
         Group = "Combat",
         Header = "Assisting",
         Category = "Assisting",
-        Index = 12,
+        Index = 14,
         Tooltip = "Prioritize the Marked target as the combat target.",
         Default = false,
         ConfigType = "Advanced",
@@ -1012,7 +1035,7 @@ Config.DefaultConfig                                     = {
         Group = "Combat",
         Header = "Assisting",
         Category = "Assisting",
-        Index = 13,
+        Index = 15,
         Tooltip = "If no other valid MA is found, fallback to ourselves.\nPlease note that when solo (and not using the Assist List), we are always our own MA.",
         Type = "Combo",
         ComboOptions = { 'Never', 'Only in Groups', 'Only in Raids', 'Always', },
@@ -3848,7 +3871,7 @@ end
 --- Moves the PC at the given index down.
 --- @param id number The index of the PC to move.
 --- @param listName string: The list to adjust.
-function Config:AssistMoveDown(id, listName)
+function Config:ListMoveDown(id, listName)
     if not id then
         Logger.log_error("\ar%s Move Down: this command requires a valid argument!", listName)
         return

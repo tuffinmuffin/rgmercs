@@ -375,6 +375,75 @@ function Ui.RenderList(listName, ordered)
     end
 end
 
+--- Friendly labels and the enable-setting for each assist source key.
+local AssistSourceMeta = {
+    ['AssistList'] = { label = "Assist List", enable = "UseAssistList", },
+    ['Raid']       = { label = "Raid Assist", enable = "UseRaidAssist", },
+    ['Group']      = { label = "Group Assist", enable = "UseGroupAssist", },
+}
+
+--- Renders the reorderable assist-source priority list. Each source can be
+--- enabled/disabled and moved up/down to control which assist is consulted first.
+function Ui.RenderAssistSources()
+    local order = Config:GetSetting('AssistSourceOrder') or {}
+
+    Ui.RenderText("Higher rows are consulted first. The first enabled source with a valid assist becomes your Main Assist.")
+    local tableId = "AssistSourceOrder"
+    if ImGui.BeginTable(tableId, 4, bit32.bor(ImGuiTableFlags.Borders, ImGuiTableFlags.RowBg)) then
+        ImGui.TableSetupColumn('Priority', (ImGuiTableColumnFlags.WidthFixed), 50.0)
+        ImGui.TableSetupColumn('Source', (ImGuiTableColumnFlags.WidthFixed), 110.0)
+        ImGui.TableSetupColumn('Enabled', (ImGuiTableColumnFlags.WidthFixed), 110.0)
+        ImGui.TableSetupColumn('Order', (ImGuiTableColumnFlags.WidthStretch), 60.0)
+        ImGui.TableHeadersRow()
+
+        for idx, source in ipairs(order) do
+            local meta = AssistSourceMeta[source]
+            ImGui.TableNextColumn()
+            Ui.RenderText(tostring(idx))
+            ImGui.TableNextColumn()
+            Ui.RenderText(meta and meta.label or source)
+
+            ImGui.TableNextColumn()
+            local enableKey = meta and meta.enable
+            local enabled = enableKey and Config:GetSetting(enableKey) or false
+            if enabled then
+                ImGui.PushStyleColor(ImGuiCol.Button, Globals.Constants.Colors.ConditionPassColor)
+            else
+                ImGui.PushStyleColor(ImGuiCol.Button, Globals.Constants.Colors.ConditionFailColor)
+            end
+            ImGui.PushID("##_assist_src_enable_" .. source)
+            if ImGui.SmallButton(enabled and "Enabled" or "Disabled") then
+                if enableKey then Config:SetSetting(enableKey, not enabled) end
+            end
+            ImGui.PopID()
+            ImGui.PopStyleColor()
+
+            ImGui.TableNextColumn()
+            ImGui.PushID("##_assist_src_up_" .. source)
+            if idx == 1 then
+                ImGui.InvisibleButton(Icons.FA_CHEVRON_UP, ImVec2(22, 1))
+            else
+                if ImGui.SmallButton(Icons.FA_CHEVRON_UP) then
+                    Config:ListMoveUp(idx, tableId)
+                end
+            end
+            ImGui.PopID()
+            ImGui.SameLine()
+            ImGui.PushID("##_assist_src_dn_" .. source)
+            if idx == #order then
+                ImGui.InvisibleButton(Icons.FA_CHEVRON_DOWN, ImVec2(22, 1))
+            else
+                if ImGui.SmallButton(Icons.FA_CHEVRON_DOWN) then
+                    Config:ListMoveDown(idx, tableId)
+                end
+            end
+            ImGui.PopID()
+        end
+
+        ImGui.EndTable()
+    end
+end
+
 --- Returns the 1-based index of name in Globals.ClassConfigDirs, or 1 if absent.
 ---@param name string Config directory name to look up.
 ---@return number 1-based index in ClassConfigDirs.

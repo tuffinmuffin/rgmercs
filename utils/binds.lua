@@ -17,6 +17,37 @@ Binds.ImmunityKeywords = {}
 for _, name in ipairs(Globals.Constants.ResistTypes)     do Binds.ImmunityKeywords[name:lower()] = { canonical = name, group = "elementalImmunities", } end
 for _, name in ipairs(Globals.Constants.ImmunityEffects) do Binds.ImmunityKeywords[name:lower()] = { canonical = name, group = "statusImmunities", } end
 
+--- Broadcasts a "call assist" to all group (or raid) RG members: clears any backoff hold and,
+--- if we have an NPC target, force-targets it so everyone engages immediately. When breakRange is
+--- true, also tells them to ignore Assist Range so they will path to the mob from any distance
+--- (auto-clears on each toon when the forced target dies).
+---@param raid boolean True to broadcast to the whole raid; false for the current group.
+---@param breakRange boolean True to also ignore the Assist Range distance gate.
+local function doCallAssist(raid, breakRange)
+    local dgExec = raid and "/dgraexecute" or "/dggaexecute"
+    local scopeLabel = raid and "Raid" or "Group"
+
+    -- Release any backoff hold so held characters resume assisting.
+    Core.DoCmd("/squelch %s /rgl backoff off", dgExec)
+
+    local targetId = Targeting.GetTargetID()
+    local haveNpc = targetId and targetId > 0 and (Targeting.TargetIsType("npc") or Targeting.TargetIsType("npcpet"))
+
+    if haveNpc then
+        -- Force the target first; setting a (new) force target resets any prior range-break.
+        Core.DoCmd("/squelch %s /rgl forcetarget %d", dgExec, targetId)
+        -- Then assert range-break, scoped to that forced target (auto-clears when the mob dies).
+        if breakRange then
+            mq.delay(5)
+            Core.DoCmd("/squelch %s /rgl forceassistrange on", dgExec)
+        end
+        Logger.log_info("\agCall Assist!\ax %s members assisting on \ay%s\ax%s.", scopeLabel,
+            mq.TLO.Target.CleanName() or "your target", breakRange and " \ar(breaking assist range)\ax" or "")
+    else
+        Logger.log_info("\agCall Assist!\ax %s backoff cleared (no NPC target to force).", scopeLabel)
+    end
+end
+
 Binds.MainHandler = function(cmd, ...)
     if not cmd or cmd:len() == 0 then cmd = "help" end
 
@@ -159,6 +190,28 @@ Binds.Handlers    = {
         about = "Will force the target <id> or your current target to trigger all burn checks - resets when combat ends.",
         handler = function(targetId)
             Targeting.SetForceBurn(targetId)
+        end,
+    },
+    ['assist'] = {
+        usage = "/rgl assist <Name|me|off>",
+        about =
+        "Temporarily assist <Name> as Main Assist, ignoring the assist priority list until cleared. Use 'me' to assist yourself, or 'off' to revert to the priority list. With no argument, your current target's name is used.",
+        handler = function(name)
+            if name and (name:lower() == "off" or name:lower() == "none" or name:lower() == "clear") then
+                Globals.AssistOverride = ""
+                Logger.log_info("\ayAssist override \awcleared.\ax Reverting to the assist priority list.")
+                return
+            end
+            if name and name:lower() == "me" then
+                name = mq.TLO.Me.CleanName()
+            end
+            if not name then name = mq.TLO.Target.CleanName() end
+            if not name or name == "" then
+                Logger.log_error("/rgl assist - no name given and no valid target exists! Use /rgl assist <Name|me|off>.")
+                return
+            end
+            Globals.AssistOverride = name
+            Logger.log_info("\ayAssist override \awset to: \ag%s\ax. Use \at/rgl assist off\ax to revert to the priority list.", name)
         end,
     },
     ['assistadd'] = {
@@ -348,6 +401,41 @@ Binds.Handlers    = {
             end
 
             Logger.log_info("\ayBackoff \awset to: %s", Strings.BoolToColorString(Globals.BackOffFlag))
+        end,
+    },
+    ['callassist'] = {
+        usage = "/rgl callassist [group|raid] [now]",
+        about =
+        "Calls all group (or raid) members running RGMercs to assist now: clears any backoff hold and, if you have an NPC target, force-targets it so everyone engages your mob immediately. Add 'now' to also break Assist Range so they path to the mob from any distance. Defaults to group scope.",
+        handler = function(arg1, arg2)
+            local function isTok(v, t) return v ~= nil and v:lower() == t end
+            local raid = isTok(arg1, "raid") or isTok(arg2, "raid")
+            local breakRange = isTok(arg1, "now") or isTok(arg2, "now")
+            doCallAssist(raid, breakRange)
+        end,
+    },
+    ['assistmenow'] = {
+        usage = "/rgl assistmenow [group|raid]",
+        about =
+        "Like /rgl callassist but always breaks Assist Range: all group (or raid) RG members drop any backoff, force your current NPC target, and path to it from any distance. Auto-clears on each toon when the mob dies.",
+        handler = function(scope)
+            local raid = scope ~= nil and scope:lower() == "raid"
+            doCallAssist(raid, true)
+        end,
+    },
+    ['forceassistrange'] = {
+        usage = "/rgl forceassistrange <on|off>",
+        about =
+        "Temporarily ignore the Assist Range distance gate so you path to and engage your assist/forced target from any distance. Auto-clears when your forced target dies. Primarily used by /rgl callassist now and /rgl assistmenow.",
+        handler = function(value)
+            if value == nil then
+                Globals.ForceAssistRange = not Globals.ForceAssistRange
+            elseif value:lower() == "on" or value == "1" then
+                Globals.ForceAssistRange = true
+            else
+                Globals.ForceAssistRange = false
+            end
+            Logger.log_info("\ayForce Assist Range \awset to: %s", Strings.BoolToColorString(Globals.ForceAssistRange))
         end,
     },
     ['qsay'] = {
