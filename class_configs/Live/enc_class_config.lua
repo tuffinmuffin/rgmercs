@@ -29,6 +29,48 @@ local auraSpellToName = {
     ["Beguiler's Aura"] = "Beguiler",                   -- "Beguiler's Aura"
 }
 
+-- Single-target mez ranks. Shared by the MezSpell ability set and the
+-- MezSpellChoice picker so the two never drift apart. Auto-resolution picks the
+-- highest-level known rank regardless of order, but KEEP THIS ORDER STABLE: a
+-- saved MezSpellChoice stores a combo index, so reordering would silently change
+-- which spell a saved choice points at. Add new ranks rather than reordering.
+local MezSpellList    = {
+    "Mesmerize XX",             -- Level 126
+    "Flummox",                  -- Level 121
+    "Addle",                    -- Level 116
+    "Deceive",                  -- Level 111
+    "Delude",                   -- Level 106
+    "Bewilder",                 -- Level 101
+    "Confound",                 -- Level 96
+    "Mislead",                  -- Level 92
+    "Baffle",                   -- Level 87
+    "Befuddle",                 -- Level 82
+    "Mystify",                  -- Level 77
+    "Bewilderment",             -- Level 72
+    "Euphoria",                 -- Level 69
+    "Felicity",                 -- Level 67
+    "Bliss",                    -- Level 64
+    "Sleep",                    -- Level 63
+    "Apathy",                   -- Level 61
+    "Ancient: Eternal Rapture", -- Level 60
+    "Rapture",                  -- Level 59
+    "Glamour of Kintaz",        -- Level 54
+    "Dazzle",                   -- Level 39
+    "Enthrall",                 -- Level 13
+    "Mesmerize",                -- Level 2
+}
+
+-- "Auto (Highest Rank)" + every ST mez rank labeled with its spell level, for the
+-- MezSpellChoice combo. Index 1 ("Auto") lets Rotation pick the best known rank;
+-- any other index pins that rank. Levels are read live so they stay correct even
+-- if the spell data changes; the name order above is fixed so stored indices are
+-- stable. The resolver strips the "(Lvl N)" suffix when looking the spell up.
+local MezSpellChoices = { "Auto (Highest Rank)", }
+for _, mezName in ipairs(MezSpellList) do
+    local mezLevel = mq.TLO.Spell(mezName).Level() or 0
+    table.insert(MezSpellChoices, mezLevel > 0 and string.format("%s (Lvl %d)", mezName, mezLevel) or mezName)
+end
+
 local _ClassConfig    = {
     _version          = "1.5 - Live",
     _author           = "Derple, Grimmier, Algar",
@@ -791,30 +833,7 @@ local _ClassConfig    = {
             "Word of Morell",      -- Level 62
             "Entrancing Lights",   -- Level 30
         },
-        ['MezSpell'] = {
-            "Mesmerize XX",             -- Level 126
-            "Flummox",                  -- Level 121
-            "Addle",                    -- Level 116
-            "Deceive",                  -- Level 111
-            "Delude",                   -- Level 106
-            "Bewilder",                 -- Level 101
-            "Confound",                 -- Level 96
-            "Mislead",                  -- Level 92
-            "Baffle",                   -- Level 87
-            "Befuddle",                 -- Level 82
-            "Mystify",                  -- Level 77
-            "Bewilderment",             -- Level 72
-            "Euphoria",                 -- Level 69
-            "Felicity",                 -- Level 67
-            "Bliss",                    -- Level 64
-            "Sleep",                    -- Level 63
-            "Apathy",                   -- Level 61
-            "Ancient: Eternal Rapture", -- Level 60
-            "Rapture",                  -- Level 59
-            "Glamour of Kintaz",        -- Level 54
-            "Enthrall",                 -- Level 13
-            "Mesmerize",                -- Level 2
-        },
+        ['MezSpell'] = MezSpellList,
         ['MezSpellFast'] = {
             "Flummoxing Flash",  -- Level 122
             "Addling Flash",     -- Level 117
@@ -1805,6 +1824,23 @@ local _ClassConfig    = {
             Min = 1,
             Max = 3,
             ConfigType = "Advanced",
+        },
+        ['MezSpellChoice']     = {
+            DisplayName = "ST Mez Spell",
+            Group = "Abilities",
+            Header = "Mez",
+            Category = "Mez General",
+            Index = 100,
+            Tooltip = "Pick a specific single-target mez rank to memorize and cast. 'Auto (Highest Rank)' uses the best one you know. A picked rank you don't actually have falls back to Auto.",
+            RequiresLoadoutChange = true,
+            Type = "Combo",
+            ComboOptions = MezSpellChoices,
+            Default = 1,
+            Min = 1,
+            Max = #MezSpellChoices,
+            FAQ = "How do I make the Enchanter mez with a specific (e.g. lower) rank instead of my highest?",
+            Answer =
+                "Set 'ST Mez Spell' to the rank you want (e.g. Dazzle). That rank is memorized and cast instead of the auto-selected highest rank. Leave it on 'Auto (Highest Rank)' to always use your best mez.",
         },
         ['TwincastMez']        = {
             DisplayName = "TwinCast Mez Usage:",

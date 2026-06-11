@@ -458,6 +458,37 @@ function Rotation.ApplyEntryOrder(entryList, savedOrder)
     for i, k in ipairs(keyed) do entryList[i] = k.entry end
 end
 
+--- Honors an optional "<setName>Choice" Combo setting that pins an ability set
+--- to a specific spell rank instead of the auto-resolved highest rank. The combo
+--- option at index 1 is always treated as "Auto"; any other index names a spell.
+--- Falls back to autoSpell if no choice is set or the chosen spell isn't known.
+---@param setName string The ability set name (e.g. "MezSpell").
+---@param autoSpell MQSpell|nil The auto-resolved best spell for the set.
+---@return MQSpell|nil The chosen spell if valid, otherwise autoSpell.
+function Rotation.ApplySpellChoiceOverride(setName, autoSpell)
+    local choiceKey = setName .. "Choice"
+    local choiceIdx = Config:GetSetting(choiceKey, true)
+    if not choiceIdx or type(choiceIdx) ~= "number" or choiceIdx <= 1 then return autoSpell end
+
+    local defaults = Config:GetSettingDefaults(choiceKey)
+    local options = defaults and defaults.ComboOptions
+    local choiceName = options and options[choiceIdx]
+    if not choiceName then return autoSpell end
+
+    -- Combo labels may carry a trailing annotation like "Dazzle (Lvl 39)"; strip
+    -- any trailing parenthetical so we resolve against the real spell name.
+    local spellName = (choiceName:gsub("%s*%b()%s*$", ""))
+
+    local choiceSpell = mq.TLO.Spell(spellName)
+    if choiceSpell and choiceSpell() and mq.TLO.Me.Book(choiceSpell.RankName.Name())() then
+        Logger.log_debug("\ag%s: using selected spell \at%s\ag instead of auto-resolved rank.", choiceKey, choiceSpell.RankName())
+        return choiceSpell
+    end
+
+    Logger.log_debug("\ay%s: selected '%s' is not in spellbook, falling back to auto-resolved rank.", choiceKey, tostring(spellName))
+    return autoSpell
+end
+
 --- Builds and returns a resolvedActionMap by calling GetBestItem, GetBestSpell,
 --- and GetBestAA for each entry in itemSets, abilitySets, and aaSets.
 ---@param itemSets table Map of set name → array of item names.
@@ -482,7 +513,8 @@ function Rotation.ResolveActions(itemSets, abilitySets, aaSets)
     for _, unresolvedName in pairs(sortedAbilitySets) do
         local spellTable = abilitySets[unresolvedName]
         Logger.log_debug("\ayFinding best spell for Set: \am%s", unresolvedName)
-        resolvedActionMap[unresolvedName] = Rotation.GetBestSpell(spellTable, resolvedActionMap)
+        local resolved = Rotation.GetBestSpell(spellTable, resolvedActionMap)
+        resolvedActionMap[unresolvedName] = Rotation.ApplySpellChoiceOverride(unresolvedName, resolved)
     end
 
     for unresolvedName, aaTable in pairs(aaSets or {}) do
