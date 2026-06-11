@@ -14,6 +14,7 @@ Modules.ModuleOrder = {
     "Charm",
     "Mez",
     "Travel",
+    "Buffs",
     "Named",
     "Map",
     "Perf",
@@ -32,6 +33,7 @@ function Modules:load(lootModule)
     self.ModuleList = {
         Movement     = require("modules.move"):New(),
         Travel       = require("modules.travel"):New(),
+        Buffs        = require("modules.buffs"):New(),
         Clickies     = require("modules.clickies"):New(),
         Class        = require("modules.class"):New(),
         Pull         = require("modules.pull"):New(),
