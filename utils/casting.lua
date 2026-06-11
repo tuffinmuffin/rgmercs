@@ -306,6 +306,14 @@ function Casting.ResolveBuffCheck(spellId, target, skipBlockCheck, skipTriggerCh
         local heartbeatName = (isPet and target.Master()) and target.Master.DisplayName() or targetName
         local heartbeat = Comms.GetPeerHeartbeatByName(heartbeatName)
 
+        if isPet then
+            Logger.log_info("[PetBuffDbg] check %s(id:%d) on %s's pet(id:%d): hbData=%s petBuffs=%s petBlocked=%s",
+                tostring(spell.RankName()), spellId, tostring(heartbeatName), target.ID(),
+                tostring(heartbeat ~= nil and heartbeat.Data ~= nil),
+                tostring((heartbeat and heartbeat.Data and heartbeat.Data.PetBuffs) ~= nil),
+                tostring((heartbeat and heartbeat.Data and heartbeat.Data.PetBlocked) ~= nil))
+        end
+
         if heartbeat and heartbeat.Data then
             local buffList = heartbeat.Data.Buffs
             local songList = heartbeat.Data.Songs
@@ -338,6 +346,10 @@ function Casting.ResolveBuffCheck(spellId, target, skipBlockCheck, skipTriggerCh
             Globals.LastCachedBuffUpdate[target.ID()] = now
         end
         Logger.log_verbose("ResolveBuffCheck: Target is not myself or a DanNet peer, using TargetBuffCheck.")
+        if isPet then
+            Logger.log_info("[PetBuffDbg] FALLTHROUGH to TargetBuffCheck for %s's pet(id:%d) -- can't read its buffs reliably (owner not broadcasting?), allowTargetChange=%s",
+                tostring(heartbeatName), target.ID(), tostring(allowTargetChange))
+        end
         return Casting.TargetBuffCheck(spellId, target, allowTargetChange, false, skipTriggerCheck)
     end
 end
@@ -835,6 +847,8 @@ function Casting.ActorPetBuffCheck(spellId, target, skipBlockCheck, skipTriggerC
         end
     end
     Logger.log_verbose("ActorPetBuffCheck: %s(ID:%d) seems to stack on %s's pet(%s, ID:%d), let's do it!", spellName, spellId, masterName, targetName, targetId)
+    Logger.log_info("[PetBuffDbg] ActorPetBuffCheck CAST %s(id:%d) on %s's pet(id:%d) -- pet currently has buffs=[%s]",
+        spellName, spellId, tostring(masterName), targetId, table.concat(buffList, ","))
     return true
 end
 
@@ -1057,6 +1071,31 @@ function Casting.HasNearbyCorpse(name)
     return mq.TLO.SpawnCount(string.format("pccorpse =%s radius 100 zradius 50", name))() > 0
 end
 
+--- Adds a group/raid member's pet to a buffable id Set when "Buff Pets as PCs"
+--- (DoActorPetBuffs) is enabled and the pet is real (skips familiars). No
+--- peer-heartbeat gate: ResolveBuffCheck later handles the stacking check for
+--- both actor-peer pets (broadcast pet buffs) and other pets (target-to-check in
+--- downtime), so any group/raid member's pet is eligible when the setting is on.
+---@param idSet table A Set (utils mq.Set) of buffable spawn IDs being built.
+---@param member MQSpawn A group or raid member spawn whose pet may be added.
+local function addBuffablePet(idSet, member)
+    if not Config:GetSetting("DoActorPetBuffs") then return end
+    if not (member and member() and (member.Pet.ID() or 0) > 0) then return end
+    if (member.Pet.CleanName() or "familiar"):lower():find("familiar") then return end
+
+    -- Only buff a peer's pet if that peer is broadcasting its pet-buff data, so
+    -- the stacking check (ActorPetBuffCheck) can see what's already on the pet.
+    -- You cannot read another player's pet buffs client-side, so without this we
+    -- fall through to TargetBuffCheck (sees nothing) and re-cast endlessly --
+    -- the chain-buffing bug. Broadcasting requires "Buff Pets as PCs" enabled on
+    -- the pet's OWNER too; pets of owners not broadcasting are skipped. This
+    -- mirrors the petBuffList/petBlockedList gate ResolveBuffCheck uses.
+    local heartbeat = Comms.GetPeerHeartbeatByName(member.DisplayName())
+    if not (heartbeat and heartbeat.Data and heartbeat.Data.PetBuffs and heartbeat.Data.PetBlocked) then return end
+
+    idSet:add(member.Pet.ID())
+end
+
 --- Dispatches to GetBuffableInZoneIDs, GetBuffableRaidIDs, or
 --- GetBuffableGroupIDs based on the ActorBuffScope setting.
 ---@return table List of spawn IDs eligible to receive buffs.
@@ -1094,6 +1133,7 @@ function Casting.GetBuffableInZoneIDs()
                 return {}
             end
             zoneIds:add(member.ID())
+            addBuffablePet(zoneIds, member)
         end
     end
 
@@ -1120,14 +1160,8 @@ function Casting.GetBuffableInZoneIDs()
 
                 zoneIds:add(zoneSpawn.ID())
 
-                if Config:GetSetting("DoActorPetBuffs") then
-                    local groupMember = mq.TLO.Group.Member(peerName or "")
-                    if groupMember() and groupMember.Pet.ID() > 0 then
-                        if not (groupMember.Pet.CleanName() or "familiar"):lower():find("familiar") then
-                            zoneIds:add(groupMember.Pet.ID())
-                        end
-                    end
-                end
+                -- gated on the owner broadcasting pet-buff data (see addBuffablePet)
+                addBuffablePet(zoneIds, mq.TLO.Group.Member(peerName or ""))
             end
         end
     end
@@ -1174,6 +1208,7 @@ function Casting.GetBuffableRaidIDs()
                 return {}
             end
             raidIds:add(member.ID())
+            addBuffablePet(raidIds, member)
         end
     end
 
@@ -1198,14 +1233,8 @@ function Casting.GetBuffableRaidIDs()
             end
             raidIds:add(raidMember.ID())
 
-            if Config:GetSetting("DoActorPetBuffs") then
-                local groupMember = mq.TLO.Group.Member(peer)
-                if groupMember() and groupMember.Pet.ID() > 0 and not groupMember.OtherZone() then
-                    if not (groupMember.Pet.CleanName() or "familiar"):lower():find("familiar") then
-                        raidIds:add(groupMember.Pet.ID())
-                    end
-                end
-            end
+            -- gated on the owner broadcasting pet-buff data (see addBuffablePet)
+            addBuffablePet(raidIds, mq.TLO.Group.Member(peer))
         end
     end
 
@@ -1251,15 +1280,7 @@ function Casting.GetBuffableGroupIDs()
                 return {}
             end
             groupIds:add(member.ID())
-            if Config:GetSetting("DoActorPetBuffs") then
-                if #Comms.GetPeerHeartbeatByName(member.DisplayName()) > 0 then
-                    if member() and member.Pet.ID() > 0 then
-                        if not (member.Pet.CleanName() or "familiar"):lower():find("familiar") then
-                            groupIds:add(member.Pet.ID())
-                        end
-                    end
-                end
-            end
+            addBuffablePet(groupIds, member)
         end
     end
 

@@ -420,6 +420,47 @@ function Module:AddCCTarget(mobId)
 	}
 end
 
+function Module:TryApplyTashToCharmTarget(targetId)
+	if not Config:GetSetting('DoTash') then return true end
+
+	local tashSpell = Core.GetResolvedActionMapItem('TashSpell')
+	if not tashSpell or not tashSpell() then return true end
+
+	local target = mq.TLO.Spawn(targetId)
+	if not target or not target() then return true end
+
+	Targeting.SetTarget(targetId)
+
+	-- Core.SetTarget can return before the client has actually swapped target on
+	-- high-ping servers, which makes DetSpellCheck below bail out via its
+	-- "not our current target" guard and silently skip the tash. Confirm the
+	-- swap so the stacking check reads the charm candidate's debuffs.
+	mq.delay(1000, function() return mq.TLO.Target.ID() == targetId end)
+	if mq.TLO.Target.ID() ~= targetId then
+		Logger.log_debug("TryApplyTashToCharmTarget(%d): Target hasn't switched yet, deferring charm.", targetId)
+		return false
+	end
+
+	if not Casting.DetSpellCheck(tashSpell, target) then
+		return true
+	end
+
+	Logger.log_debug("TryApplyTashToCharmTarget(%d): Applying Tash before charm.", targetId)
+
+	if not Casting.SpellReady(tashSpell, true) then
+		Logger.log_debug("TryApplyTashToCharmTarget(%d): Tash not ready, deferring charm.", targetId)
+		return false
+	end
+
+	if Casting.UseSpell(tashSpell.RankName(), targetId, true) then
+		Logger.log_debug("TryApplyTashToCharmTarget(%d): Tash cast succeeded.", targetId)
+	else
+		Logger.log_debug("TryApplyTashToCharmTarget(%d): Tash cast failed, deferring charm.", targetId)
+	end
+
+	return false
+end
+
 function Module:IsValidCharmTarget(mobId)
 	local spawn = mq.TLO.Spawn(mobId)
 
@@ -570,6 +611,10 @@ function Module:ProcessCharmList()
 						end
 
 						Targeting.SetTarget(id)
+
+						if not self:TryApplyTashToCharmTarget(id) then
+							break
+						end
 
 						local maxWait = 5000
 						while not Casting.SpellReady(charmSpell) and maxWait > 0 do

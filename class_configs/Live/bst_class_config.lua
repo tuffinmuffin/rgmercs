@@ -456,6 +456,9 @@ return {
             -- "Spirit of the Shrew", -- Level 39, ],
             "Spirit of wolf", -- Level 24
         },
+        ['ShrinkSpell'] = {
+            "Shrink", -- Level 23
+        },
         ['ManaRegenBuff'] = {
             "Spiritual Enlightenment XVII", -- Level 128
             "Spiritual Enduement",          -- Level 123
@@ -1197,6 +1200,24 @@ return {
                 end,
             },
             {
+                name = "Group Shrink",
+                type = "AA",
+                load_cond = function(self) return Config:GetSetting('DoGroupShrink') and Casting.CanUseAA("Group Shrink") end,
+                active_cond = function(self) return mq.TLO.Me.Height() < 2 end,
+                cond = function(self, aaName, target)
+                    return Targeting.GetTargetHeight(target) > 2.2
+                end,
+            },
+            {
+                name = "ShrinkSpell",
+                type = "Spell",
+                load_cond = function(self) return Config:GetSetting('DoGroupShrink') and not Casting.CanUseAA("Group Shrink") end,
+                active_cond = function(self) return mq.TLO.Me.Height() < 2 end,
+                cond = function(self, spell, target)
+                    return Targeting.GetTargetHeight(target) > 2.2
+                end,
+            },
+            {
                 name = "AvatarSpell",
                 type = "Spell",
                 load_cond = function(self) return Config:GetSetting('DoAvatar') end,
@@ -1731,6 +1752,19 @@ return {
             Tooltip = "Buff Group/Pet with Infusion of Spirit",
             Default = false,
             RequiresLoadoutChange = true,
+        },
+        ['DoGroupShrink']  = {
+            DisplayName = "Group Shrink",
+            Group = "Abilities",
+            Header = "Buffs",
+            Category = "Group",
+            Index = 103,
+            RequiresLoadoutChange = true,
+            Tooltip = "Use Group Shrink Buff",
+            Default = true,
+            FAQ = "Group Shrink is enabled, why are my dudes still big?",
+            Answer =
+            "For simplicity, the check to use it is keyed to the Beastlord's height, rather than checking each group member. The Group Shrink AA isn't available until level 80 (on official servers); below that the single-target Shrink spell is used as a fallback.",
         },
         ['DoVetAA']        = {
             DisplayName = "Use Vet AA",

@@ -531,12 +531,18 @@ function Core.GetPetBuffTable()
 
     if mq.TLO.Me.Pet.ID() > 0 then
         for i = 1, 30 do
-            local buff = mq.TLO.Me.PetBuff(i)
+            -- Use the Pet TLO's Buff (Me.Pet.Buff) rather than Me.PetBuff: on some
+            -- servers the indexed Me.PetBuff slots come back empty, so we broadcast
+            -- an empty pet-buff list and peers chain-cast buffs that are already up.
+            -- Me.Pet.Buff is the same source LocalPetBuffCheck trusts.
+            local buff = mq.TLO.Me.Pet.Buff(i)
             if buff() and (buff.ID() or 0) > 0 then
                 table.insert(Globals.CurrentPetBuffs, buff.ID())
             end
         end
     end
+    Logger.log_info("[PetBuffDbg] GetPetBuffTable: captured %d pet buff(s): [%s]",
+        #Globals.CurrentPetBuffs, table.concat(Globals.CurrentPetBuffs, ","))
     Logger.log_debug("Pet Buff Finish")
 end
 

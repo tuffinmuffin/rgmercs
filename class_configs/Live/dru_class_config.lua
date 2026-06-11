@@ -733,6 +733,15 @@ local _ClassConfig = {
             "Protection of Steel",        -- Level 27
             "Protection of Rock",         -- Level 19
             "Protection of Wood",         -- Level 9
+            -- Classic single-target HP line (era/TLP servers e.g. Aradune).
+            -- The live "Protection of/Blessing" names above don't exist there,
+            -- so the resolver falls through to whichever of these is scribed.
+            "Natureskin",                 -- Level 57
+            "Skin like Nature",           -- Level 44
+            "Skin like Diamond",          -- Level 30
+            "Skin like Steel",            -- Level 19
+            "Skin like Rock",             -- Level 9
+            "Skin like Wood",             -- Level 1
         },
         ['TempHPBuff'] = {
             -- Temp Health -- Focus on Tank
@@ -795,6 +804,14 @@ local _ClassConfig = {
             "Legacy of Bracken",       -- Level 65
             "Legacy of Thorn",         -- Level 59
             "Legacy of Spike",         -- Level 49
+            -- Single-target DS fallback (era/TLP servers e.g. Aradune). The group
+            -- "Legacy" line above doesn't exist there, so the resolver falls through
+            -- to these; the rotation's tank guard keeps them on the tank only.
+            "Shield of Thorns",        -- Level 47
+            "Shield of Spikes",        -- Level 37
+            "Shield of Brambles",      -- Level 27
+            "Shield of Barbs",         -- Level 17
+            "Shield of Thistles",      -- Level 7
         },
         ['MoveSpells'] = {
             "Flight of Falcons", -- Level 91
@@ -1031,15 +1048,15 @@ local _ClassConfig = {
                 name = "SunDot",
                 type = "Spell",
                 cond = function(self, spell)
-                    return Core.IsModeActive("Mana") or
-                        (Core.IsModeActive("Heal") and Config:GetSetting('DoFire')) and Casting.DotSpellCheck(spell) and Config:GetSetting('DoDot')
+                    return (Core.IsModeActive("Mana") or
+                            (Core.IsModeActive("Heal") and Config:GetSetting('DoFire'))) and Casting.DotSpellCheck(spell) and Config:GetSetting('DoDot') and Casting.HaveManaToDot()
                 end,
             },
             {
                 name = "HordeDot",
                 type = "Spell",
                 cond = function(self, spell)
-                    return Core.IsModeActive("Mana") and Casting.DotSpellCheck(spell) and Config:GetSetting('DoDot')
+                    return Core.IsModeActive("Mana") and Casting.DotSpellCheck(spell) and Config:GetSetting('DoDot') and Casting.HaveManaToDot()
                 end,
             },
             {
@@ -1047,7 +1064,7 @@ local _ClassConfig = {
                 type = "Spell",
                 cond = function(self, spell)
                     return (Core.IsModeActive("Mana") or Config:GetSetting('DoNuke')) and Casting.DetSpellCheck(spell) and Targeting.GetTargetPctHPs() > 60 and
-                        mq.TLO.Me.PctMana() > 50
+                        Casting.HaveManaToNuke()
                 end,
             },
             {
@@ -1055,7 +1072,7 @@ local _ClassConfig = {
                 type = "Spell",
                 cond = function(self, spell)
                     return Config:GetSetting('DoFire') and Casting.DetSpellCheck(spell) and Config:GetSetting('DoNuke') and
-                        Targeting.GetTargetPctHPs() < Config:GetSetting('NukePct')
+                        Targeting.GetTargetPctHPs() < Config:GetSetting('NukePct') and Casting.OkayToNuke()
                 end,
             },
             {
@@ -1063,7 +1080,7 @@ local _ClassConfig = {
                 type = "Spell",
                 cond = function(self, spell)
                     return not Config:GetSetting('DoFire') and Casting.DetSpellCheck(spell) and Config:GetSetting('DoNuke') and
-                        Targeting.GetTargetPctHPs() < Config:GetSetting('NukePct')
+                        Targeting.GetTargetPctHPs() < Config:GetSetting('NukePct') and Casting.OkayToNuke()
                 end,
             },
             {
@@ -1071,14 +1088,14 @@ local _ClassConfig = {
                 type = "Spell",
                 cond = function(self, spell)
                     return Core.IsModeActive("Mana") and Casting.DotSpellCheck(spell) and Config:GetSetting('DoDot') and
-                        Targeting.GetTargetLevel() >= mq.TLO.Me.Level()
+                        Targeting.GetTargetLevel() >= mq.TLO.Me.Level() and Casting.HaveManaToDot()
                 end,
             },
             {
                 name = "NaturesWrathDot",
                 type = "Spell",
                 cond = function(self, spell)
-                    return Core.IsModeActive("Mana") and Casting.DotSpellCheck(spell) and Config:GetSetting('DoDot')
+                    return Core.IsModeActive("Mana") and Casting.DotSpellCheck(spell) and Config:GetSetting('DoDot') and Casting.HaveManaToDot()
                 end,
             },
             {
@@ -1116,7 +1133,7 @@ local _ClassConfig = {
                 name = "Nature's Frost",
                 type = "AA",
                 cond = function(self, aaName)
-                    return Core.IsModeActive("Mana") and mq.TLO.Me.PctMana() > 50 and
+                    return Core.IsModeActive("Mana") and Casting.HaveManaToNuke() and
                         (not Core.IsModeActive("Heal") or (Core.IsModeActive("Heal") and not Config:GetSetting('DoFire') and Casting.OkayToNuke()))
                 end,
             },
@@ -1124,7 +1141,7 @@ local _ClassConfig = {
                 name = "Nature's Fire",
                 type = "AA",
                 cond = function(self, aaName)
-                    return mq.TLO.Me.PctMana() > 50 and Config:GetSetting('DoNuke') and
+                    return Casting.HaveManaToNuke() and Config:GetSetting('DoNuke') and
                         (not Core.IsModeActive("Heal") or (Core.IsModeActive("Heal") and Config:GetSetting('DoFire') and Casting.OkayToNuke()))
                 end,
             },
@@ -1132,7 +1149,7 @@ local _ClassConfig = {
                 name = "Nature's Bolt",
                 type = "AA",
                 cond = function(self, aaName)
-                    return Core.IsModeActive("Mana") and mq.TLO.Me.PctMana() > 50
+                    return Core.IsModeActive("Mana") and Casting.HaveManaToNuke()
                 end,
             },
         },
@@ -1271,6 +1288,7 @@ local _ClassConfig = {
                 type = "Spell",
                 active_cond = function(self, spell) return Casting.IHaveBuff(spell) end,
                 cond = function(self, spell, target)
+                    if (spell.TargetType() or ""):lower() ~= "group v2" and not Targeting.TargetClassIs({ "WAR", "SHD", "PAL", }, target) then return false end
                     return Casting.GroupBuffCheck(spell, target)
                 end,
             },
@@ -1555,7 +1573,6 @@ local _ClassConfig = {
                             Core.IsModeActive("Mana")
                     end,
                 },
-                { name = "RootSpells",   cond = function(self) return Core.IsModeActive("Mana") end, },
                 -- [ HEAL MODE ] --
                 { name = "TwinHealNuke", cond = function(self) return Config:GetSetting("DoTwinHeal") end, },
                 { name = "GroupCure",    cond = function(self) return true end, },
