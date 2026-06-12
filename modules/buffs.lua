@@ -95,6 +95,27 @@ function Module:isBuff(spell)
     return (spell.Duration.TotalSeconds() or 0) > 0
 end
 
+-- Spell effect IDs (SPAs) that mark NPC-control / crowd-control spells (lull,
+-- blind, charm, fear, mez). These are never cast on group/raid members even
+-- though the game may flag the spell "Beneficial", so they should not show up
+-- as castable player buffs.
+Module.NonBuffSPAs = {
+    18, -- Pacify / Lull / Harmony (reduce NPC aggro radius)
+    20, -- Blind
+    22, -- Charm
+    23, -- Fear
+    31, -- Mesmerize
+}
+
+--- True if the spell carries any NPC-control effect (lull/charm/mez/fear/blind).
+function Module:isNpcControlSpell(spell)
+    if not spell or not spell() then return false end
+    for _, spa in ipairs(self.NonBuffSPAs) do
+        if spell.HasSPA(spa)() then return true end
+    end
+    return false
+end
+
 --- Maps an mq TargetType string to a catalog bucket name, or nil to skip.
 function Module:bucketForType(tt)
     if tt == "Group v1" or tt == "Group v2" then
@@ -112,6 +133,9 @@ end
 --- Adds a resolved spell object to the catalog (de-duped by rank name).
 function Module:AddCatalogEntry(spell, source, isCommon)
     if not self:isBuff(spell) then return end
+    -- Auto-discovered sources skip crowd-control spells (lull etc.); an explicit
+    -- user-added spell is always honored so flexibility is preserved.
+    if source ~= "user" and self:isNpcControlSpell(spell) then return end
 
     local tt = spell.TargetType() or ""
     local bucket = self:bucketForType(tt)
