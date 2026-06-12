@@ -527,6 +527,13 @@ return {
                 end,
             },
             {
+                name = "Pick Pockets",
+                type = "Ability",
+                cond = function(self, abilityName, target)
+                    return Config:GetSetting('DoPickPocket')
+                end,
+            },
+            {
                 name = "Slice",
                 type = "Disc",
             },
@@ -781,6 +788,15 @@ return {
             Index = 101,
             Tooltip = "Use Sneak Attack line to start combat (e.g, Daggerslash).",
             Default = true,
+        },
+        ['DoPickPocket']    = {
+            DisplayName = "Do Pick Pockets",
+            Group = "Abilities",
+            Header = "Damage",
+            Category = "Direct",
+            Index = 102,
+            Tooltip = "Use the Pick Pockets skill on your target during combat whenever it is ready.",
+            Default = false,
         },
         ['EmergencyStart']  = {
             DisplayName = "Emergency HP%",
