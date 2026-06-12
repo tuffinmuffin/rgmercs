@@ -529,8 +529,20 @@ return {
             {
                 name = "Pick Pockets",
                 type = "Ability",
+                pre_activate = function(self, abilityName)
+                    -- Pick Pockets fails while auto-attacking; drop attack first.
+                    if mq.TLO.Me.Combat() then
+                        Core.DoCmd("/attack off")
+                        mq.delay(100, function() return not mq.TLO.Me.Combat() end)
+                    end
+                end,
                 cond = function(self, abilityName, target)
                     return Config:GetSetting('DoPickPocket')
+                end,
+                post_activate = function(self, abilityName, success)
+                    if not mq.TLO.Me.Combat() then
+                        Core.DoCmd("/attack on")
+                    end
                 end,
             },
             {
