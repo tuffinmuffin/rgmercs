@@ -528,21 +528,25 @@ return {
             },
             {
                 name = "Pick Pockets",
-                type = "Ability",
-                pre_activate = function(self, abilityName)
-                    -- Pick Pockets fails while auto-attacking; drop attack first.
-                    if mq.TLO.Me.Combat() then
+                type = "CustomFunc",
+                cond = function(self, abilityName, target)
+                    -- Use the engine's ready + range + target check, gated by the toggle.
+                    return Config:GetSetting('DoPickPocket') and Casting.AbilityReady("Pick Pockets", target)
+                end,
+                custom_func = function(self, targetId)
+                    -- Pick Pockets fails while auto-attacking, so drop attack, steal, resume.
+                    local wasInCombat = mq.TLO.Me.Combat()
+                    if wasInCombat then
                         Core.DoCmd("/attack off")
                         mq.delay(100, function() return not mq.TLO.Me.Combat() end)
                     end
-                end,
-                cond = function(self, abilityName, target)
-                    return Config:GetSetting('DoPickPocket')
-                end,
-                post_activate = function(self, abilityName, success)
-                    if not mq.TLO.Me.Combat() then
+                    -- Multi-word skills must be quoted; UseAbility's unquoted /doability breaks here.
+                    Core.DoCmd('/doability "Pick Pockets"')
+                    mq.delay(50, function() return not mq.TLO.Me.AbilityReady("Pick Pockets")() end)
+                    if wasInCombat and not mq.TLO.Me.Combat() then
                         Core.DoCmd("/attack on")
                     end
+                    return true
                 end,
             },
             {
