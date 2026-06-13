@@ -267,6 +267,7 @@ Module.Constants.AbortLogMessages   = {
     disabled = "\ar ALERT: Pulling Disabled at user request. \ax",
     spawnGone = "PULL:\ar ALERT: Aborting mob died or despawned \ax",
     stranger = "PULL:\ar ALERT: Aborting mob is fighting a stranger and safe targeting is enabled! \ax",
+    targetingOther = "PULL:\ar ALERT: Aborting mob is targeting a non-group member! \ax",
     unreachable = "PULL:\ar ALERT: Aborting Fight To target has been unreachable for too long \ax",
     tooFar = "PULL:\ar ALERT: Aborting mob moved out of spawn distance \ax",
     noPath = "PULL:\ar ALERT: Aborting mob no longer reachable on mesh \ax",
@@ -784,6 +785,19 @@ Module.DefaultConfig                = {
         Min = 1,
         Max = 150,
         ConfigType = "Advanced",
+    },
+    ['PullIgnoreOthersTargets']                = {
+        DisplayName = "Ignore Others' Mobs",
+        Group = "Movement",
+        Header = "Pulling",
+        Category = "Targets",
+        Index = 7,
+        Tooltip = "Do not pull (and abort in-progress pulls on) mobs whose current target is a player, pet, or merc that is not in your group.",
+        Default = true,
+        FAQ = "Why does my puller skip mobs that are already fighting someone else?",
+        Answer =
+            "With \"Ignore Others' Mobs\" enabled (the default), RGMercs will not pull a mob whose current target is a player (or their pet/merc) who is not in your group, so you don't steal or interfere with another group's mobs.\n\n" ..
+            "Disable this on the Pull module's Targets settings if you want to pull regardless of who the mob is currently targeting.",
     },
     --Group Vitals
     ['WatchScope']                             = {
@@ -1383,6 +1397,7 @@ function Module.DecideAbort(attempt, abortCtx)
         if abortCtx.distance > abortCtx.maxPathRange then return 'tooFar' end
         if not abortCtx.pathExists then return 'noPath' end
         if abortCtx.safeTargeting and abortCtx.fightingStranger then return 'stranger' end
+        if abortCtx.targetingOther then return 'targetingOther' end
         if not abortCtx.navigating and abortCtx.timedOut then return 'timeout' end
     elseif attempt.source == 'manual' then
         if not abortCtx.navigating and abortCtx.timedOut then return 'manualTimeout' end
@@ -3503,6 +3518,11 @@ function Module:GetPullableSpawns()
             return false
         end
 
+        if Config:GetSetting('PullIgnoreOthersTargets') and Targeting.IsSpawnTargetingNonGroupMember(spawn) then
+            Logger.log_verbose("\atPULL::FindPullTarget \awSpawn \am%s\aw (\at%d\aw) \aois targeting a non-group member -- Skipping", spawnName, spawn.ID())
+            return false
+        end
+
         if policy.successCheck == 'chainCount' then
             if Targeting.IsSpawnXTHater(spawn.ID()) then
                 Logger.log_verbose("\atPULL::FindPullTarget \awSpawn \am%s\aw (\at%d\aw) \aoAlready on XTarget -- Skipping", spawnName, spawn.ID())
@@ -3654,6 +3674,7 @@ function Module:CheckAttemptAbort(attempt, bNavigating)
         abortCtx.pathExists = mq.TLO.Navigation.PathExists("id " .. attempt.targetId)()
         abortCtx.safeTargeting = Config:GetSetting('SafeTargeting')
         abortCtx.fightingStranger = Targeting.IsSpawnFightingStranger(spawn, 500)
+        abortCtx.targetingOther = Config:GetSetting('PullIgnoreOthersTargets') and Targeting.IsSpawnTargetingNonGroupMember(spawn)
         abortCtx.timedOut = attempt.engageStartedAt ~= nil and (Globals.GetTimeSeconds() - attempt.engageStartedAt) >= Config:GetSetting('PullIgnoreTime')
     elseif attempt.source == 'manual' then
         abortCtx.timedOut = attempt.engageStartedAt ~= nil and (Globals.GetTimeSeconds() - attempt.engageStartedAt) >= Config:GetSetting('PullIgnoreTime')

@@ -700,6 +700,37 @@ function Targeting.GroupedWithTarget(target)
     return mq.TLO.Group.Member(targetName)() and true or false
 end
 
+--- Returns true if spawn is currently targeting a player (or that player's pet
+--- or merc) who is not in our group. Used to avoid pulling mobs that are already
+--- claimed by / fighting someone outside the group. A mob with no target, or one
+--- targeting an NPC or a group member, returns false.
+---@param spawn MQSpawn The spawn to check.
+---@return boolean True if spawn is targeting a non-group player.
+function Targeting.IsSpawnTargetingNonGroupMember(spawn)
+    if not spawn or not spawn() then return false end
+
+    local mobTarget = spawn.Target
+    -- No target means it's a fresh, unclaimed mob -- fine to pull.
+    if not mobTarget or not mobTarget() or (mobTarget.ID() or 0) == 0 then return false end
+
+    local targetType = (mobTarget.Type() or ""):lower()
+    local checkName = mobTarget.CleanName() or ""
+
+    if targetType == "pcpet" then
+        checkName = mobTarget.Master.CleanName() or checkName
+    elseif targetType == "mercenary" then
+        checkName = (mobTarget.Owner() and mobTarget.Owner.CleanName()) or checkName
+    elseif targetType ~= "pc" then
+        -- Targeting an NPC (or nothing player-owned) -- not another player's claim.
+        return false
+    end
+
+    if checkName:len() == 0 then return false end
+    if checkName == (mq.TLO.Me.CleanName() or "") then return false end
+
+    return not (mq.TLO.Group.Member(checkName)() and true or false)
+end
+
 --- Marks targetId (or current target if 0) as the force-burn target and
 --- announces it to group/raid per config settings.
 ---@param targetId number Spawn ID to force burn; 0 uses the current target.
