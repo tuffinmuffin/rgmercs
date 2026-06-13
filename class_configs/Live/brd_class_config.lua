@@ -27,7 +27,8 @@ local Tooltips     = {
     GroupRegenSong  = "Song Line: Group HP/Mana Regen",
     FireBuffSong    = "Song Line: Fire DD Spell Damage Increase and Effiency",
     SlowSong        = "Song Line: ST Melee Attack Slow",
-    AESlowSong      = "Song Line: PBAE Melee Attack Slow",
+    AESlowSong      = "Song Line: PBAE Melee Attack Slow (Snare, no damage)",
+    AESlowDmgSong   = "Song Line: PBAE Melee Attack Slow (with Damage)",
     AccelerandoSong = "Song Line: Reduce Beneficial Spell Casttime / Aggro Reduction Modifier",
     RecklessSong    = "Song Line: Increase Crit Heal and Crit HoT Chance",
     ColdBuffSong    = "Song Line: Cold DD Damage Increase and Effiency",
@@ -375,16 +376,19 @@ local _ClassConfig = {
             "Selo's Consonant Chain",   -- Level 23, Base Game (40 % slow, 160% snare)
         },
         ['AESlowSong'] = {
-            -- AESlowSong - Level Range 20 - 114 (Single target works better)
-            "Zinnia's Melodic Binding",     -- Level 124, LS
-            "Radiwol's Melodic Binding",    -- Level 114, ToV
-            "Dekloaz's Melodic Binding",    -- Level 109, RoS
-            "Protan's Melodic Binding",     -- Level 99, RoF
+            -- PBAE Slow + Snare (no damage) - "Melodic Binding" line
+            "Zinnia's Melodic Binding",  -- Level 124, LS
+            "Radiwol's Melodic Binding", -- Level 114, ToV
+            "Dekloaz's Melodic Binding", -- Level 109, RoS
+            "Protan's Melodic Binding",  -- Level 99, RoF
+            "Largo's Melodic Binding",   -- Level 20, Base Game
+        },
+        ['AESlowDmgSong'] = {
+            -- PBAE Slow + Damage
             "Zuriki's Song of Shenanigans", -- Level 67, OoW
             "Melody of Mischief",           -- Level 62, PoP
             "Selo's Assonant Strain",       -- Level 54, RoK
             "Selo's Chords of Cessation",   -- Level 48, Base Game
-            "Largo's Melodic Binding",      -- Level 20, Base Game
         },
         ['AccelerandoSong'] = {
             "Alleviating Accelerando VIII", -- Level 128, SoR
@@ -787,7 +791,8 @@ local _ClassConfig = {
                 { name = "MezSong",       cond = function(self) return Config:GetSetting('DoSTMez') end, },
                 { name = "CharmSong",     cond = function(self) return Config:GetSetting('CharmOn') end, },
                 { name = "SlowSong",      cond = function(self) return Config:GetSetting('DoSTSlow') end, },
-                { name = "AESlowSong",    cond = function(self) return Config:GetSetting('DoAESlow') end, },
+                { name = "AESlowSong",    cond = function(self) return Config:GetSetting('DoAESlow') and Config:GetSetting('AESlowChoice') == 1 end, },
+                { name = "AESlowDmgSong", cond = function(self) return Config:GetSetting('DoAESlow') and Config:GetSetting('AESlowChoice') == 2 end, },
                 { name = "DispelSong",    cond = function(self) return Config:GetSetting('DoDispel') end, },
                 { name = "CureSong",      cond = function(self) return Config:GetSetting('UseCure') end, },
                 { name = "RunBuffSong",   cond = function(self) return Config:GetSetting('UseRunBuff') > 1 and not Casting.CanUseAA("Selo's Sonata") end, },
@@ -1033,7 +1038,15 @@ local _ClassConfig = {
             {
                 name = "AESlowSong",
                 type = "Song",
-                load_cond = function(self) return Config:GetSetting('DoAESlow') end,
+                load_cond = function(self) return Config:GetSetting('DoAESlow') and Config:GetSetting('AESlowChoice') == 1 end,
+                cond = function(self, songSpell, target)
+                    return Casting.DetSpellCheck(songSpell) and Targeting.GetXTHaterCount() > 2 and not mq.TLO.Target.Slowed() and not Casting.SlowImmuneTarget(target)
+                end,
+            },
+            {
+                name = "AESlowDmgSong",
+                type = "Song",
+                load_cond = function(self) return Config:GetSetting('DoAESlow') and Config:GetSetting('AESlowChoice') == 2 end,
                 cond = function(self, songSpell, target)
                     return Casting.DetSpellCheck(songSpell) and Targeting.GetXTHaterCount() > 2 and not mq.TLO.Target.Slowed() and not Casting.SlowImmuneTarget(target)
                 end,
@@ -1600,6 +1613,20 @@ local _ClassConfig = {
             Tooltip = Tooltips.AESlowSong,
             RequiresLoadoutChange = true,
             Default = false,
+        },
+        ['AESlowChoice']    = {
+            DisplayName = "AE Slow Type:",
+            Group = "Abilities",
+            Header = "Debuffs",
+            Category = "Slow",
+            Index = 103,
+            Tooltip = "Choose which PBAE slow line to use when Use Slow (AE) is on: Snare (Melodic Binding line, slow + snare, no damage) or Damage (slow + damage).",
+            Type = "Combo",
+            ComboOptions = { 'Snare', 'Damage', },
+            Default = 1,
+            Min = 1,
+            Max = 2,
+            RequiresLoadoutChange = true,
         },
         ['DoDispel']        = {
             DisplayName = "Use Dispel",
