@@ -202,6 +202,25 @@ Binds.Handlers    = {
             Logger.log_info("\awForced target cleared.")
         end,
     },
+    ['forcematarget'] = {
+        usage = "/rgl forcematarget",
+        about =
+        "Resolve your Main Assist's current target and force it as your target, overriding Stay On Target / manual targeting until that mob dies. Handy as a hotkey to jump onto the MA's mob.",
+        handler = function()
+            local maId = Combat.GetMainAssistTargetID()
+            if not maId or maId == 0 then
+                Logger.log_info("\ay/rgl forcematarget - your Main Assist (%s) has no resolvable target right now.", Globals.MainAssist or "None")
+                return
+            end
+            local spawn = mq.TLO.Spawn(maId)
+            if not spawn or not spawn() or spawn.ID() == 0 then
+                Logger.log_info("\ay/rgl forcematarget - MA target id %d is no longer a valid spawn.", maId)
+                return
+            end
+            Globals.SetForcedTargetId(maId)
+            Logger.log_info("\awForced MA Target: \ag%s\ax (%d)", spawn.CleanName() or "None", maId)
+        end,
+    },
     ['forcenamed'] = {
         usage = "/rgl forcenamed",
         about = "Will force the current target to be considered a Named (this flag does not persist and is for testing purposes).",
@@ -616,6 +635,31 @@ Binds.Handlers    = {
         about = "Toggle the pause state of your RGMercs Main Loop.",
         handler = function()
             Globals.PauseMain = not Globals.PauseMain
+        end,
+    },
+    ['toggle'] = {
+        usage = "/rgl toggle <setting>",
+        about =
+        "Toggles a boolean RGMercs setting in place (no value needed). Use this for hotkeys/Button Master so the button never reads the ${RGMercs} TLO - reading that TLO from another script makes MacroQuest kill that script when RGMercs unloads.",
+        handler = function(config)
+            if not config or config:len() == 0 then
+                Logger.log_error("/rgl toggle - a setting name is required! Use /rgl toggle <setting>.")
+                return
+            end
+            -- Resolve the canonical (proper-case) setting name so `/rgl toggle manualmode` works too.
+            local handlerInfo = Config.CommandHandlers and Config.CommandHandlers[config:lower()]
+            local canonical = handlerInfo and handlerInfo.name or config
+            local current = Config:GetSetting(canonical, true)
+            if current == nil then
+                Logger.log_error("\at%s\aw - \arNot a valid config setting!\ax", config)
+                return
+            end
+            if type(current) ~= "boolean" then
+                Logger.log_error("\at%s\aw - \aronly boolean (on/off) settings can be toggled!\ax", canonical)
+                return
+            end
+            Config:SetSetting(canonical, not current)
+            Logger.log_info("\ay%s \awtoggled to: %s", canonical, Strings.BoolToColorString(not current))
         end,
     },
     ['pause'] = {

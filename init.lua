@@ -376,6 +376,10 @@ local function RGInit(...)
     initMsg = "Done!"
 
     HudUI:LoadAllOptions()
+
+    -- Seed the decoupled status file so external readers (hotkeys / Button Master
+    -- titles) have a value to show before the first setting change.
+    Config:PublishStatusFile()
 end
 
 local function Main()

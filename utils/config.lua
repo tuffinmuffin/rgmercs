@@ -18,6 +18,14 @@ local Config   = {
 Config.__index = Config
 Config.Db      = require("utils.config_db").new(mq.configDir .. '/rgmercs/rgmercs_config.db')
 Config.Db:setCollectStats(true)
+
+-- Settings whose ON/OFF state is mirrored to a plain per-character status
+-- file (see Config:PublishStatusFile) so external tools - hotkeys, a Button
+-- Master button title, etc. - can display them WITHOUT reading the ${RGMercs}
+-- TLO. Reading that TLO from another Lua script makes MacroQuest treat that
+-- script as a dependent of RGMercs and tear it down when RGMercs unloads.
+-- Add a setting name here to expose it.
+Config.PublishedStatusSettings = { "ManualMode", "StayOnTarget", }
 Config.moduleDefaultSettings                             = {}
 Config.moduleTempSettings                                = {}
 Config.moduleSettingCategories                           = {}
@@ -3534,6 +3542,42 @@ function Config:SetSetting(setting, value, tempOnly, noCallback)
     -- broadcast the change to any listeners.
     Comms.BroadcastMessage(self._name, "UpdatePeerSetSetting",
         { peer = Comms.GetPeerName(), module = settingModuleName, setting = setting, value = cleanValue, })
+
+    -- Mirror published toggles to the decoupled status file so external readers
+    -- (hotkeys / Button Master button titles) never have to touch the ${RGMercs} TLO.
+    if valueChanged then
+        for _, name in ipairs(Config.PublishedStatusSettings) do
+            if name == setting then
+                self:PublishStatusFile()
+                break
+            end
+        end
+    end
+end
+
+--- Absolute path of the per-character status file that decoupled external
+--- tools can read without touching the ${RGMercs} TLO.
+---@return string
+function Config:StatusFilePath()
+    return string.format("%s/rgmercs/status/%s_%s.txt", mq.configDir, Globals.CurServerNormalized, Globals.CurLoadedChar)
+end
+
+--- (Re)writes the per-character status file with the current value of every
+--- setting in Config.PublishedStatusSettings, one "Name=ON|OFF" line each.
+--- Cheap: only called on startup and when a published setting actually changes.
+function Config:PublishStatusFile()
+    local path = self:StatusFilePath()
+    Files.make_p_for_file(path)
+    local f = io.open(path, "w")
+    if not f then
+        Logger.log_debug("\ayPublishStatusFile: could not open %s for writing.", path)
+        return
+    end
+    for _, name in ipairs(Config.PublishedStatusSettings) do
+        local v = self:GetSetting(name, true)
+        f:write(string.format("%s=%s\n", name, (v == true) and "ON" or "OFF"))
+    end
+    f:close()
 end
 
 --- Temporarily sets a setting
