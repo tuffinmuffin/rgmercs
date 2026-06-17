@@ -496,7 +496,7 @@ Binds.Handlers    = {
                 return
             end
             local scopeArg = (scope and scope:lower() ~= "all") and scope or "all"
-            Modules:ExecModule("Buffs", "CastSet", setName, scopeArg)
+            Modules:ExecModule("Buffs", "CastSet", setName, scopeArg, true) -- commands ignore the BuffMinMana floor
         end,
     },
     ['buffgroup'] = {
@@ -508,7 +508,7 @@ Binds.Handlers    = {
                 Logger.log_error("/rgl buffgroup - a numeric group number is required! Use /rgl buffgroup <group#>.")
                 return
             end
-            Modules:ExecModule("Buffs", "CastGroupNum", n)
+            Modules:ExecModule("Buffs", "CastGroupNum", n, true) -- commands ignore the BuffMinMana floor
         end,
     },
     ['buffstop'] = {
@@ -523,7 +523,7 @@ Binds.Handlers    = {
         about = "Cast all currently-checked buffs now (without saving a set). 'all' (default) buffs every group; a number scopes group buffs to that group.",
         handler = function(scope)
             local scopeArg = (scope and scope:lower() ~= "all") and scope or "all"
-            Modules:ExecModule("Buffs", "CastChecked", scopeArg)
+            Modules:ExecModule("Buffs", "CastChecked", scopeArg, true) -- commands ignore the BuffMinMana floor
         end,
     },
     ['buffadd'] = {
@@ -660,6 +660,39 @@ Binds.Handlers    = {
             end
             Config:SetSetting(canonical, not current)
             Logger.log_info("\ay%s \awtoggled to: %s", canonical, Strings.BoolToColorString(not current))
+        end,
+    },
+    ['toggle_all'] = {
+        usage = "/rgl toggle_all <setting>",
+        about =
+        "Reads THIS character's current value for a boolean setting, flips it, then applies that same explicit value to this character and every RGMercs peer so all clients end in one known state. Use this for a sync hotkey instead of broadcasting '/rgl toggle' (which flips each peer's own state independently and desyncs them). Reads the state internally, so the button never needs the ${RGMercs} TLO.",
+        handler = function(config)
+            if not config or config:len() == 0 then
+                Logger.log_error("/rgl toggle_all - a setting name is required! Use /rgl toggle_all <setting>.")
+                return
+            end
+            -- Resolve the canonical (proper-case) setting name so `/rgl toggle_all manualmode` works too.
+            local handlerInfo = Config.CommandHandlers and Config.CommandHandlers[config:lower()]
+            local canonical = handlerInfo and handlerInfo.name or config
+            local current = Config:GetSetting(canonical, true)
+            if current == nil then
+                Logger.log_error("\at%s\aw - \arNot a valid config setting!\ax", config)
+                return
+            end
+            if type(current) ~= "boolean" then
+                Logger.log_error("\at%s\aw - \aronly boolean (on/off) settings can be toggled!\ax", canonical)
+                return
+            end
+            -- Compute the target state once from the triggering char, then push that SAME value everywhere.
+            local newValue = not current
+            Config:SetSetting(canonical, newValue)
+            local peers = Comms.GetPeers(false)
+            for _, peer in pairs(peers) do
+                if peer ~= mq.TLO.Me.Name() then
+                    Config:PeerSetSetting(peer, canonical, newValue)
+                end
+            end
+            Logger.log_info("\ay%s \awtoggled on all clients to: %s", canonical, Strings.BoolToColorString(newValue))
         end,
     },
     ['pause'] = {

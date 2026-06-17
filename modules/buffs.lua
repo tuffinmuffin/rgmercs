@@ -6,6 +6,7 @@
 local mq        = require('mq')
 local Base      = require("modules.base")
 local Core      = require("utils.core")
+local Casting   = require("utils.casting")
 local Config    = require("utils.config")
 local Globals   = require("utils.globals")
 local Logger    = require("utils.logger")
@@ -331,21 +332,22 @@ end
 -- Enqueue helpers
 ----------------------------------------------------------------------
 
-function Module:Enqueue(spellName, targetId, label, group)
+function Module:Enqueue(spellName, targetId, label, group, ignoreMana)
     if not targetId or targetId <= 0 then return end
     table.insert(self.TempSettings.Queue, {
         spellName = spellName,
         targetId = targetId,
         label = label,
         group = group,
+        ignoreMana = ignoreMana == true,
     })
 end
 
 --- Enqueue a group buff. groupNum nil = all groups. Group v2 (PBAE) only ever
 --- affects the caster's own group -> a single self-targeted cast.
-function Module:EnqueueGroupBuff(entry, groupNum)
+function Module:EnqueueGroupBuff(entry, groupNum, ignoreMana)
     if entry.v2 then
-        self:Enqueue(entry.key, mq.TLO.Me.ID() or 0, entry.name .. " (Caster Group)", nil)
+        self:Enqueue(entry.key, mq.TLO.Me.ID() or 0, entry.name .. " (Caster Group)", nil, ignoreMana)
         return
     end
 
@@ -353,13 +355,13 @@ function Module:EnqueueGroupBuff(entry, groupNum)
         for _, gn in ipairs(self:RosterGroupNums()) do
             local g = self.TempSettings.Roster.groups[gn]
             if g and (g.anchorId or 0) > 0 then
-                self:Enqueue(entry.key, g.anchorId, string.format("%s (G%d)", entry.name, gn), gn)
+                self:Enqueue(entry.key, g.anchorId, string.format("%s (G%d)", entry.name, gn), gn, ignoreMana)
             end
         end
     else
         local g = self.TempSettings.Roster.groups[groupNum]
         if g and (g.anchorId or 0) > 0 then
-            self:Enqueue(entry.key, g.anchorId, string.format("%s (G%d)", entry.name, groupNum), groupNum)
+            self:Enqueue(entry.key, g.anchorId, string.format("%s (G%d)", entry.name, groupNum), groupNum, ignoreMana)
         end
     end
 end
@@ -378,7 +380,7 @@ function Module:MatchesFilter(spawn, filter)
 end
 
 --- Enqueue a single-target buff on every unique roster member matching filter.
-function Module:EnqueueSingleBuff(entry, filter)
+function Module:EnqueueSingleBuff(entry, filter, ignoreMana)
     local seen = {}
     for _, gn in ipairs(self:RosterGroupNums()) do
         local g = self.TempSettings.Roster.groups[gn]
@@ -387,24 +389,24 @@ function Module:EnqueueSingleBuff(entry, filter)
                 seen[id] = true
                 local spawn = mq.TLO.Spawn(id)
                 if spawn and spawn() and self:MatchesFilter(spawn, filter) then
-                    self:Enqueue(entry.key, id, string.format("%s -> %s", entry.name, spawn.CleanName() or tostring(id)), nil)
+                    self:Enqueue(entry.key, id, string.format("%s -> %s", entry.name, spawn.CleanName() or tostring(id)), nil, ignoreMana)
                 end
             end
         end
     end
 end
 
-function Module:EnqueueSelfBuff(entry)
-    self:Enqueue(entry.key, mq.TLO.Me.ID() or 0, entry.name .. " (Self)", nil)
+function Module:EnqueueSelfBuff(entry, ignoreMana)
+    self:Enqueue(entry.key, mq.TLO.Me.ID() or 0, entry.name .. " (Self)", nil, ignoreMana)
 end
 
-function Module:EnqueuePetBuff(entry)
+function Module:EnqueuePetBuff(entry, ignoreMana)
     local petId = mq.TLO.Me.Pet.ID() or 0
     if petId <= 0 then
         Logger.log_debug("\ayBuffs: no pet to buff with %s", entry.name)
         return
     end
-    self:Enqueue(entry.key, petId, entry.name .. " (Pet)", nil)
+    self:Enqueue(entry.key, petId, entry.name .. " (Pet)", nil, ignoreMana)
 end
 
 ----------------------------------------------------------------------
@@ -420,6 +422,17 @@ function Module:ProcessQueue()
     if (mq.gettime() - self.TempSettings.LastCastClock) < 250 then return end
 
     local job = self.TempSettings.Queue[1]
+
+    -- Respect the BuffMinMana floor for window-initiated jobs; hold (don't drop)
+    -- until mana recovers. Slash-command jobs set ignoreMana and bypass this.
+    if not job.ignoreMana and not Casting.HaveManaToBuff() then
+        if (mq.gettime() - (self.TempSettings.LastManaHoldLog or 0)) > 5000 then
+            Logger.log_debug("\ayBuffs: holding '%s' -- mana %d%% below BuffMinMana (%d%%).",
+                job.label or job.spellName, mq.TLO.Me.PctMana() or 0, Config:GetSetting('BuffMinMana'))
+            self.TempSettings.LastManaHoldLog = mq.gettime()
+        end
+        return
+    end
 
     -- Re-validate the target spawn; drop the job if it's gone (no retry).
     local spawn = mq.TLO.Spawn(job.targetId)
@@ -453,8 +466,9 @@ end
 -- Saved sets & command targets
 ----------------------------------------------------------------------
 
---- Cast a saved set. scope is "all" or a group number.
-function Module:CastSet(setName, scope)
+--- Cast a saved set. scope is "all" or a group number. ignoreMana=true skips
+--- the BuffMinMana floor (slash commands); the window omits it to respect it.
+function Module:CastSet(setName, scope, ignoreMana)
     self:BuildRoster()
 
     local sets = Config:GetSetting("Buffs_SavedSets") or {}
@@ -476,14 +490,14 @@ function Module:CastSet(setName, scope)
             if entry then
                 local bucket = self:BucketOf(entry)
                 if bucket == "group" then
-                    self:EnqueueGroupBuff(entry, groupNum)
+                    self:EnqueueGroupBuff(entry, groupNum, ignoreMana)
                 elseif bucket == "single" then
                     local filter = (set.filters and set.filters[key]) or "all"
-                    self:EnqueueSingleBuff(entry, filter)
+                    self:EnqueueSingleBuff(entry, filter, ignoreMana)
                 elseif bucket == "self" then
-                    self:EnqueueSelfBuff(entry)
+                    self:EnqueueSelfBuff(entry, ignoreMana)
                 elseif bucket == "pet" then
-                    self:EnqueuePetBuff(entry)
+                    self:EnqueuePetBuff(entry, ignoreMana)
                 end
             else
                 Logger.log_debug("\ayBuffs: set '%s' references unknown buff key '%s'.", setName, key)
@@ -495,7 +509,7 @@ function Module:CastSet(setName, scope)
 end
 
 --- Enqueue all currently-checked group buffs onto group n.
-function Module:CastGroupNum(n)
+function Module:CastGroupNum(n, ignoreMana)
     self:BuildRoster()
     if not n or not self.TempSettings.Roster.groups[n] then
         Logger.log_error("\arBuffs: group %s is not present in the roster.", tostring(n))
@@ -505,7 +519,7 @@ function Module:CastGroupNum(n)
     local count = 0
     for _, entry in ipairs(self.TempSettings.Catalog.group) do
         if self.TempSettings.SetChecks[entry.key] then
-            self:EnqueueGroupBuff(entry, n)
+            self:EnqueueGroupBuff(entry, n, ignoreMana)
             count = count + 1
         end
     end
@@ -529,7 +543,7 @@ end
 --- Cast every currently-checked buff now, without saving a set. scope is "all"
 --- or a group number (group number only affects group buffs; single/self/pet
 --- always fire on their matched targets).
-function Module:CastChecked(scope)
+function Module:CastChecked(scope, ignoreMana)
     self:BuildRoster()
 
     local groupNum = nil
@@ -545,15 +559,15 @@ function Module:CastChecked(scope)
             if entry then
                 local bucket = self:BucketOf(entry)
                 if bucket == "group" then
-                    self:EnqueueGroupBuff(entry, groupNum)
+                    self:EnqueueGroupBuff(entry, groupNum, ignoreMana)
                 elseif bucket == "single" then
                     local idx = self.TempSettings.SingleFilters[key] or 1
                     local filter = (self.SingleFilterOptions[idx] or "All"):lower()
-                    self:EnqueueSingleBuff(entry, filter)
+                    self:EnqueueSingleBuff(entry, filter, ignoreMana)
                 elseif bucket == "self" then
-                    self:EnqueueSelfBuff(entry)
+                    self:EnqueueSelfBuff(entry, ignoreMana)
                 elseif bucket == "pet" then
-                    self:EnqueuePetBuff(entry)
+                    self:EnqueuePetBuff(entry, ignoreMana)
                 end
                 count = count + 1
             end

@@ -1083,15 +1083,22 @@ function Casting.OkayToPetBuff()
     return Casting.CheckOkayToBuff()
 end
 
+--- Mana floor for buffing: true unless the player is a caster class below the
+--- BuffMinMana % setting. Shared by CheckOkayToBuff and the Buffs raid window.
+---@return boolean True if the player has enough mana to start a buff.
+function Casting.HaveManaToBuff()
+    return not (Globals.Constants.RGCasters:contains(mq.TLO.Me.Class.ShortName()) and mq.TLO.Me.PctMana() < Config:GetSetting('BuffMinMana'))
+end
+
 --- Core gate for OkayToBuff/OkayToPetBuff: checks visibility, no
 --- XT haters or auto-target, stationary long enough (BuffWaitMoveTimer),
---- and casters above 10% mana.
+--- and casters above the BuffMinMana % floor.
 ---@return boolean True if all buff-safety conditions are met.
 function Casting.CheckOkayToBuff()
     local visible = not mq.TLO.Me.Invis()
     local safe = Targeting.GetXTHaterCount() == 0 and Globals.AutoTargetID == 0
     local stationary = not (Config:GetSetting('BuffWaitMoveTimer') > Movement:GetTimeSinceLastMove() or mq.TLO.MoveTo.Moving() or mq.TLO.Me.Moving() or mq.TLO.Navigation.Active())
-    local able = not (Globals.Constants.RGCasters:contains(mq.TLO.Me.Class.ShortName()) and mq.TLO.Me.PctMana() < 10)
+    local able = Casting.HaveManaToBuff()
 
     return visible and safe and stationary and able
 end

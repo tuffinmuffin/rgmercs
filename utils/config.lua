@@ -25,7 +25,7 @@ Config.Db:setCollectStats(true)
 -- TLO. Reading that TLO from another Lua script makes MacroQuest treat that
 -- script as a dependent of RGMercs and tear it down when RGMercs unloads.
 -- Add a setting name here to expose it.
-Config.PublishedStatusSettings = { "ManualMode", "StayOnTarget", }
+Config.PublishedStatusSettings = { "ManualMode", "StayOnTarget", "DoAutoTarget", }
 Config.moduleDefaultSettings                             = {}
 Config.moduleTempSettings                                = {}
 Config.moduleSettingCategories                           = {}
@@ -1555,6 +1555,19 @@ Config.DefaultConfig                                     = {
         Default = 30,
         Min = 1,
         Max = 120,
+        ConfigType = "Advanced",
+    },
+    ['BuffMinMana']                = {
+        DisplayName = "Min Mana % to Buff",
+        Group = "Abilities",
+        Header = "Buffs",
+        Category = "Buff Rules",
+        Index = 8,
+        Tooltip =
+        "Caster classes will not start a buff while below this mana %. Applies to the Downtime/Group buff rotations and the Buffs raid window. Manual /rgl buff* commands ignore this floor.",
+        Default = 10,
+        Min = 0,
+        Max = 100,
         ConfigType = "Advanced",
     },
     ['BuffAssistList']             = {

@@ -1000,6 +1000,17 @@ local _ClassConfig = {
             Max = 10,
             ConfigType = "Advanced",
         },
+        ['NamedDefense']     = {
+            DisplayName = "Def. Discs on Named",
+            Group = "Abilities",
+            Header = "Tanking",
+            Category = "Defenses",
+            Index = 104,
+            Tooltip = "Preemptively cycle defensive discs as soon as the target is flagged 'named', before taking damage. Disable to only use defensive discs based on HP % (Emergency Start) and mob count (Def. Disc. Count).",
+            Default = true,
+            FAQ = "Why does my Warrior pop Defensive Discipline the instant a named is pulled?",
+            Answer = "By default, Warriors preemptively cycle defensive discs on named targets. Turn off 'Def. Discs on Named' (Tanking > Defenses) to instead reserve them for low HP or large pulls.",
+        },
         ['EmergencyStart']   = {
             DisplayName = "Emergency Start",
             Group = "Abilities",
