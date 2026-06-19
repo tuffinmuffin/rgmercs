@@ -903,6 +903,11 @@ _ClassConfig      = {
             "Malaisement", -- Level 44
             "Malaise",     -- Level 22
         },
+        -- Mala: unique L60 debuff - -35 to ALL resists with a very low resist check (almost always lands), but a slow
+        -- cast. Kept out of MaloDebuff so the normal line never auto-picks it; cast only when "Use Mala" is enabled.
+        ['MalaDebuff'] = {
+            "Mala", -- Level 60
+        },
         ['SingleCotH'] = {
             "Call of the Hero", -- Level 55
         },
@@ -919,9 +924,17 @@ _ClassConfig      = {
     ['Charm']             = {
         ['Assist'] = {
             {
+                name = "MalaDebuff",
+                type = "Spell",
+                load_cond = function() return Config:GetSetting('UseMala') end,
+                cond = function(self, spell, target)
+                    return Casting.DetSpellCheck(spell, target)
+                end,
+            },
+            {
                 name = "Malaise",
                 type = "AA",
-                load_cond = function() return Casting.CanUseAA("Malaise") end,
+                load_cond = function() return not Config:GetSetting('UseMala') and Casting.CanUseAA("Malaise") end,
                 cond = function(self, aaName, target)
                     return Casting.DetAACheck(aaName, target)
                 end,
@@ -929,7 +942,7 @@ _ClassConfig      = {
             {
                 name = "MaloDebuff",
                 type = "Spell",
-                load_cond = function() return not Casting.CanUseAA("Malaise") end,
+                load_cond = function() return not Config:GetSetting('UseMala') and not Casting.CanUseAA("Malaise") end,
                 cond = function(self, spell, target)
                     return Casting.DetSpellCheck(spell, target)
                 end,
@@ -1527,8 +1540,17 @@ _ClassConfig      = {
         },
         ['Malo'] = {
             {
+                name = "MalaDebuff",
+                type = "Spell",
+                load_cond = function() return Config:GetSetting('UseMala') end,
+                cond = function(self, spell, target)
+                    return Casting.DetSpellCheck(spell)
+                end,
+            },
+            {
                 name = "Malaise",
                 type = "AA",
+                load_cond = function() return not Config:GetSetting('UseMala') end,
                 cond = function(self, aaName, target)
                     return Casting.DetAACheck(aaName)
                 end,
@@ -1537,7 +1559,7 @@ _ClassConfig      = {
                 name = "MaloDebuff",
                 type = "Spell",
                 cond = function(self, spell, target)
-                    if Casting.CanUseAA("Malaise") then return false end
+                    if Config:GetSetting('UseMala') or Casting.CanUseAA("Malaise") then return false end
                     return Casting.DetSpellCheck(spell)
                 end,
             },
@@ -1776,7 +1798,8 @@ _ClassConfig      = {
                 { name = "MagicDD",            cond = function(self) return self.Helpers.ShouldUseLowLevelRotation() end, },
                 { name = "SummonedNuke",       cond = function(self) return Config:GetSetting('DoSummonedNuke') end, },
                 { name = "EpicPetOrb",         cond = function(self) return Config:GetSetting('UseEpicPet') and mq.TLO.Me.Book("Summon Orb")() end, },
-                { name = "MaloDebuff",         cond = function(self) return Config:GetSetting('DoMalo') and not Casting.CanUseAA("Malaise") end, },
+                { name = "MalaDebuff",         cond = function(self) return Config:GetSetting('DoMalo') and Config:GetSetting('UseMala') end, },
+                { name = "MaloDebuff",         cond = function(self) return Config:GetSetting('DoMalo') and not Config:GetSetting('UseMala') and not Casting.CanUseAA("Malaise") end, },
                 { name = "TwinCast", },
                 { name = "SkinDS",             cond = function(self) return Config:GetSetting('DoSkinDS') or Core.IsModeActive("PetTank") end, },
                 { name = "PetStanceSpell",     cond = function(self) return Core.IsModeActive("PetTank") end, },
@@ -1942,6 +1965,15 @@ _ClassConfig      = {
             Tooltip = "Do Malo Spells/AAs",
             RequiresLoadoutChange = true,
             Default = true,
+        },
+        ['UseMala']        = {
+            DisplayName = "Use Mala",
+            Group = "Abilities",
+            Header = "Debuffs",
+            Category = "Resist",
+            Tooltip = "Cast Mala (the unique L60 debuff: -35 to all resists, almost never resisted, but slow to cast) as your single-target malo instead of the regular Malo line. Off = use the normal Malo line (larger debuff but higher chance to resist) and ignore Mala. Requires Cast Malo to be on.",
+            RequiresLoadoutChange = true,
+            Default = false,
         },
         ['DoAEMalo']       = {
             DisplayName = "Cast AE Malo",

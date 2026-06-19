@@ -441,6 +441,15 @@ function Module:EntrySpell(entry)
     return Entries.Spell(entry, resolvedName)
 end
 
+-- the value an entry's `cond` receives as its 2nd arg, matching the rotation convention (Rotation.GetEntryConditionArg):
+-- spell/song/disc get the resolved spell object; aa/item/ability get the name (so DetAACheck/DetItemCheck get the name they expect)
+function Module:EntryCondArg(entry, spell)
+    local entryType = (entry.type or ""):lower()
+    if entryType == "spell" or entryType == "song" or entryType == "disc" then return spell end
+    return entry.name
+end
+
+-- did the entry resolve to a usable action? abilities resolve by name (no spell object); all others need a live spell TLO
 function Module:EntryResolves(entry, spell)
     return Entries.Resolves(entry, spell)
 end
@@ -640,7 +649,7 @@ function Module:RunPreCharm(charmId)
         local spell = self:EntrySpell(entry)
         local enabled = self:EntryEnabled(entry, "PreCharm")
         local resolves = self:EntryResolves(entry, spell)
-        local condPass = resolves and Core.SafeCallFunc("Charm PreCharm cond", entry.cond, self, spell, target)
+        local condPass = resolves and Core.SafeCallFunc("Charm PreCharm cond", entry.cond, self, self:EntryCondArg(entry, spell), target)
         Logger.log_super_verbose("\ayRunPreCharm :: %s en=%s res=%s cond=%s", entry.name or "?", tostring(enabled), tostring(resolves), tostring(condPass))
         if enabled and condPass then
             ---@cast spell MQSpell
@@ -778,12 +787,22 @@ function Module:GetKeptCharmID()
     return 0
 end
 
--- the mob we want peers to help lock down: a forcecharm target we don't hold yet (locked pre-charm), or our broken-but-tracked charm (0 if none)
+-- the mob we want peers to help lock down / debuff: a forcecharm target we don't hold yet (locked pre-charm),
+-- or a charm we've lost and are re-acquiring. Advertised for the WHOLE pet-slot-empty window - not just the single
+-- tick DetectBreaks flags `loose` - so assisters (e.g. a malo) keep landing debuffs in the gaps between, and after
+-- interrupted, re-charm attempts. Clears the instant we hold a pet again (so peers never debuff our held charm).
 function Module:GetLooseCharmID()
     if not Core.IsCharming() then return 0 end
     if Globals.ForceCharmID > 0 and (mq.TLO.Me.Pet.ID() or 0) ~= Globals.ForceCharmID then return Globals.ForceCharmID end
+    -- holding a pet => nothing loose; the moment the slot empties, a tracked charm is one we're re-grabbing
+    if (mq.TLO.Me.Pet.ID() or 0) > 0 then return 0 end
     for id, data in pairs(self.TempSettings.CharmTracker) do
         if data.loose then return id end
+    end
+    -- pet slot empty and a charm still tracked (break not yet flagged this tick, or mid re-grab): advertise it too,
+    -- but only while we actually intend to re-acquire it (PersistCharm), matching GetKeptCharmID's protection window
+    if Config:GetSetting('PersistCharm') then
+        return next(self.TempSettings.CharmTracker) or 0
     end
     return 0
 end
@@ -975,7 +994,7 @@ function Module:PerformCharmAssist(id)
         local enabled = self:EntryEnabled(entry, "Assist")
         local resolves = self:EntryResolves(entry, spell)
         local ready = resolves and self:EntryReady(entry, spell)
-        local condOk = ready and Core.SafeCallFunc("Charm Assist cond", entry.cond, self, spell, target)
+        local condOk = ready and Core.SafeCallFunc("Charm Assist cond", entry.cond, self, self:EntryCondArg(entry, spell), target)
         Logger.log_super_verbose("\ayPerformCharmAssist :: %s en=%s res=%s ready=%s cond=%s", entry.name or "?",
             tostring(enabled), tostring(resolves), tostring(ready), tostring(condOk))
         if enabled and resolves and ready and condOk then
