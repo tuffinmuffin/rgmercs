@@ -394,7 +394,9 @@ function Module:ChaseOn(nameParam)
     -- if no name passed, use current chase target
     local targetName = nameParam or (currentChase ~= "" and currentChase)
 
-    -- being told to chase ourselves means we're the chase target; stop chasing whoever we were following.
+    -- Chasing ourselves (e.g. a group-wide "chase <anchor>" broadcast that names us) means we ARE
+    -- the anchor: hold position and turn chase off instead of redirecting to the Main Assist, so the
+    -- anchor doesn't run off following its MA.
     if targetName == mq.TLO.Me.CleanName() then
         Logger.log_warn("\ayWarning: Attempting to chase yourself, stopping chase instead.")
         self:CampOff()
