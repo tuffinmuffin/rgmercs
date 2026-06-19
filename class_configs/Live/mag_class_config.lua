@@ -643,6 +643,12 @@ _ClassConfig      = {
             "Iceflame Body",       -- Level 74
             "Iceflame Guard",      -- Level 70
         },
+        ['PetRunSpeed'] = {
+            -- Pet movement speed (SoW). Velocity and Expedience do NOT stack;
+            -- the framework picks the highest one the Mage knows.
+            "Velocity",   -- Level 58
+            "Expedience", -- Level 27
+        },
         ['EarthPetSpell'] = {
             "Earth Elemental XXVI",       -- Level 129
             "Recruitment of Earth",       -- Level 124
@@ -1233,6 +1239,16 @@ _ClassConfig      = {
             },
             {
                 name = "PetHaste",
+                type = "Spell",
+                active_cond = function(self, spell)
+                    return mq.TLO.Me.PetBuff(spell.RankName.Name())() ~= nil or mq.TLO.Me.PetBuff(spell.Name())() ~= nil
+                end,
+                cond = function(self, spell)
+                    return Casting.PetBuffCheck(spell)
+                end,
+            },
+            {
+                name = "PetRunSpeed",
                 type = "Spell",
                 active_cond = function(self, spell)
                     return mq.TLO.Me.PetBuff(spell.RankName.Name())() ~= nil or mq.TLO.Me.PetBuff(spell.Name())() ~= nil
