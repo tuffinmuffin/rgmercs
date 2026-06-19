@@ -221,13 +221,17 @@ local _ClassConfig    = {
             "Clairvoyance",                -- Level 68
             "Voice of Quellious",          -- Level 65
             "Tranquility",                 -- Level 63
-            -- "Gift of Brilliance",       -- Level 60, Removed because the Map Defaults to it Instead of Koadics
             "Koadic's Endless Intellect",  -- Level 60
             "Gift of Pure Thought",        -- Level 56
             "Gift of Insight",             -- Level 55
             "Clarity II",                  -- Level 52
             "Clarity",                     -- Level 26
             "Breeze",                      -- Level 14
+        },
+        -- Gift of Brilliance is its own buff line (stacks with the Clarity/KEI mana-regen line),
+        -- so it gets a dedicated map + GroupBuff entry rather than competing inside ManaRegen.
+        ['GiftBuff'] = {
+            "Gift of Brilliance", -- Level 60
         },
         ['MezBuff'] = {
             "Ward of Bedazzlement XII", -- Level 130
@@ -1197,6 +1201,15 @@ local _ClassConfig    = {
                 end,
             },
             {
+                name = "GiftBuff",
+                type = "Spell",
+                active_cond = function(self, spell) return mq.TLO.Me.FindBuff("id " .. tostring(spell.ID()))() ~= nil end,
+                cond = function(self, spell, target)
+                    if not Config:GetSetting('DoGiftBuff') or not Targeting.TargetIsACaster(target) then return false end
+                    return Casting.GroupBuffCheck(spell, target)
+                end,
+            },
+            {
                 name = "HasteBuff",
                 type = "Spell",
                 active_cond = function(self, spell) return mq.TLO.Me.FindBuff("id " .. tostring(spell.ID()))() ~= nil end,
@@ -1758,6 +1771,16 @@ local _ClassConfig    = {
             Tooltip = "Enable casting use Melee Proc Buff (Night's Dark Terror Line).",
             RequiresLoadoutChange = true,
             Default = true,
+        },
+        ['DoGiftBuff']         = {
+            DisplayName = "Cast Gift of Brilliance",
+            Group = "Abilities",
+            Header = "Buffs",
+            Category = "Group",
+            Index = 109,
+            Tooltip = "Enable casting Gift of Brilliance on casters. This is a separate mana-regen line that stacks with the Clarity/KEI line (useful pre-KEI or as an extra mana buff).",
+            RequiresLoadoutChange = true,
+            Default = false,
         },
 
         --Debuffs
