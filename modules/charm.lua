@@ -116,7 +116,7 @@ Module.DefaultConfig                      = {
         Category    = "Charm Targets",
         Index       = 3,
         Default     = true,
-        Tooltip     = "Use automatic charm max-level detection based on the current charm spell.",
+        Tooltip     = "Use automatic charm max-level detection based on the current charm spell. Only affects the max level; the Charm Min Level setting is still enforced.",
         ConfigType  = "Advanced",
     },
     ['CharmRadius']                            = {
@@ -150,7 +150,7 @@ Module.DefaultConfig                      = {
         Default     = 1,
         Min         = 1,
         Max         = 200,
-        Tooltip     = "If Auto Level Range is disabled, the minimum level of a potential charm target.",
+        Tooltip     = "The minimum level of a potential charm target. Always enforced as a floor, even when Auto Level Range is enabled (Auto Level Range only sets the max).",
         ConfigType  = "Advanced",
     },
     ['CharmMaxLevel']                          = {
@@ -1029,7 +1029,8 @@ function Module:FindCharmCandidate()
     local minLevel = Config:GetSetting('CharmMinLevel')
     local maxLevel = Config:GetSetting('CharmMaxLevel')
     if Config:GetSetting('AutoLevelRangeCharm') and charmSpell and charmSpell() then
-        minLevel = 0
+        -- auto-range only controls the MAX (detected from the charm spell); still honor the
+        -- configured Charm Min Level as a floor so it isn't silently overridden.
         ---@diagnostic disable-next-line: undefined-field
         maxLevel = charmSpell.MaxLevel() or maxLevel
     end
