@@ -1037,7 +1037,8 @@ function Combat.AutoCampCheck(tempConfig, bCalledFromInsideEvent)
     if tempConfig.CampZoneId ~= mq.TLO.Zone.ID() or (tempConfig.CampInstanceId or 0) ~= (mq.TLO.Me.Instance() or 0) then return end
 
     -- let pulling module handle camp decisions while it is enabled.
-    if Config:GetSetting('DoPull') then
+    -- Manual pull mode always manages its own camp return regardless of DoPull.
+    if Config:GetSetting('DoPull') or Modules:ExecModule("Pull", "IsPullMode", "Manual") then
         -- if we are idle or waiting on a watch its possible we wandered out of camp to loot and need to come back.
         if Modules:ExecModule("Pull", "IsActivelyPulling") then
             return
@@ -1102,7 +1103,8 @@ function Combat.CombatCampCheck(tempConfig)
     if tempConfig.CampZoneId ~= mq.TLO.Zone.ID() or (tempConfig.CampInstanceId or 0) ~= (mq.TLO.Me.Instance() or 0) then return end
 
     -- let pulling module handle camp decisions while it is enabled.
-    if Config:GetSetting('DoPull') then
+    -- Manual pull mode always manages its own camp return regardless of DoPull.
+    if Config:GetSetting('DoPull') or Modules:ExecModule("Pull", "IsPullMode", "Manual") then
         -- if we are idle or waiting on a watch its possible we wandered out of camp to loot and need to come back.
         if Modules:ExecModule("Pull", "IsActivelyPulling") then
             return

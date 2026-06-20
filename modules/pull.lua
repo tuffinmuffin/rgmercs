@@ -117,6 +117,7 @@ Module.Constants.PullStates               = {
     ['PULL_PULLING']            = 9,
     ['PULL_RETURN_TO_CAMP']     = 10,
     ['PULL_WAITING_ON_MOB']     = 11,
+    ['PULL_MANUAL_OUT']         = 12,
 }
 
 Module.Constants.PullStateDisplayStrings  = {
@@ -132,6 +133,7 @@ Module.Constants.PullStateDisplayStrings  = {
     ['PULL_RETURN_TO_CAMP']     = { Display = Icons.FA_FREE_CODE_CAMP, Text = "Returning to Camp", Color = 'Green', },
     ['PULL_WAITING_ON_MOB']     = { Display = Icons.FA_CLOCK_O, Text = "Waiting on Mob", Color = 'Yellow', },
     ['PULL_WAITING_SHOULDPULL'] = { Display = Icons.FA_CLOCK_O, Text = "Waiting for Should Pull", Color = 'Red', },
+    ['PULL_MANUAL_OUT']         = { Display = Icons.MD_DIRECTIONS_RUN, Text = "Manual Pull", Color = 'Yellow', },
 }
 
 Module.Constants.PullStatesIDToName       = {}
@@ -144,6 +146,7 @@ Module.Constants.PullModes          = {
     "RoamingHunt",
     "CircuitHunt",
     "FightTo",
+    "Manual",
 }
 
 Module.Constants.PullModeDisplays   = {
@@ -153,6 +156,7 @@ Module.Constants.PullModeDisplays   = {
     "Roaming Hunt",
     "Circuit Hunt",
     "Fight To",
+    "Manual",
 }
 
 Module.Constants.PullModePolicies   = {
@@ -162,6 +166,10 @@ Module.Constants.PullModePolicies   = {
     ['RoamingHunt'] = { family = 'hunt', runsDuringCombat = false, successCheck = 'any', rescanToCloser = true, scanCenter = 'self', radiusSetting = 'PullRadiusHunt', },
     ['CircuitHunt'] = { family = 'hunt', runsDuringCombat = false, successCheck = 'any', rescanToCloser = true, scanCenter = 'waypoint', radiusSetting = 'PullRadiusHunt', },
     ['FightTo']     = { family = 'directive', runsDuringCombat = false, successCheck = 'any', rescanToCloser = false, scanCenter = 'self', radiusSetting = 'PullRadius', },
+    -- Player manually aggros; GiveTime() bypasses the scan/attempt engine entirely for this
+    -- mode (see Module:GiveTimeManual). family = 'camp' here only so the camp-required UI/role/
+    -- intent logic (which assumes 'camp' vs. 'hunt'/'directive') treats Manual like a camp mode.
+    ['Manual']      = { family = 'camp', runsDuringCombat = true, successCheck = 'any', rescanToCloser = false, scanCenter = 'self', radiusSetting = 'PullRadius', },
 }
 
 Module.Constants.RangedTypes        = Set.new({ "archery", "bow", "throwingv1", "throwing", "throwingv2", "ammo", })
@@ -354,8 +362,9 @@ Module.Constants.EngageDescriptors  = {
 
 local PullStates                    = Module.Constants.PullStates -- hot-path alias for the per-tick state compares
 
-Module.TempSettings.PullState       = PullStates.PULL_IDLE
-Module.TempSettings.PullStateReason = ""
+Module.TempSettings.PullState                 = PullStates.PULL_IDLE
+Module.TempSettings.PullStateReason           = ""
+Module.TempSettings.ManualPullReturnRequested = false
 
 Module.Constants.PullStateHandlers  = {
     [PullStates.PULL_IDLE]               = 'PreAttemptTick',
@@ -402,7 +411,8 @@ Module.DefaultConfig                = {
             "Area Hunt: Move from target to target within a defined circular area, fighting as you go. Optionally, set a hunt origin to travel to and hunt from.\n\n" ..
             "Roaming Hunt: Hunt around your current position, drifting as you fight.\n\n" ..
             "Circuit Hunt: Move between your enabled Pull Locations, hunting mobs in a defined radius from each.\n\n" ..
-            "Fight To: Travel to a chosen target or location, fighting anything that aggros along the way.",
+            "Fight To: Travel to a chosen target or location, fighting anything that aggros along the way.\n\n" ..
+            "Manual: You manually aggro mobs and the bot navigates you back to camp. Requires a camp to be set.",
     },
     ['FarmWayPoints']                          = {
         DisplayName = "Farming Waypoints",
@@ -712,6 +722,16 @@ Module.DefaultConfig                = {
         Default = 0,
         Min = 0,
         Max = 40,
+    },
+    -- Manual Pull
+    ['ManualReturnOnAggro']                     = {
+        DisplayName = "Return On Aggro",
+        Group = "Movement",
+        Header = "Pulling",
+        Category = "Manual Pull",
+        Index = 1,
+        Tooltip = "Manual Mode: Automatically navigate back to camp when mobs appear on xtarget.",
+        Default = true,
     },
     --Targets
     ['PullMinCon']                             = {
@@ -1046,6 +1066,19 @@ Module.CommandHandlers              = {
         about = "Clears the Pull Ignore List.",
         handler = function(self, name)
             self:ClearIgnoreList()
+            return true
+        end,
+    },
+    pullreturn = {
+        usage = "/rgl pullreturn",
+        about = "Manual Pull Mode: Triggers an immediate return to camp.",
+        handler = function(self, ...)
+            if not self:IsPullMode("Manual") then
+                Logger.log_error("/rgl pullreturn - Only usable in Manual pull mode!")
+                return
+            end
+            Logger.log_info("PULL:Manual - Return to camp requested via command.")
+            self.TempSettings.ManualPullReturnRequested = true
             return true
         end,
     },
@@ -1855,7 +1888,23 @@ function Module:Render()
                 ImGui.PopStyleColor()
                 Ui.Tooltip("Pausing pulls will keep the pull settings (camp, locs, etc), but it will not attempt to pull any targets until unpaused.")
                 ImGui.TableNextColumn()
-                if mq.TLO.Target() and Targeting.TargetIsType("NPC") then
+                if self:IsPullMode("Manual") then
+                    local campData = Modules:ExecModule("Movement", "GetCampData")
+                    local outOfCamp = campData.returnToCamp and
+                        Math.GetDistanceSquared(mq.TLO.Me.X(), mq.TLO.Me.Y(),
+                            campData.campSettings.AutoCampX, campData.campSettings.AutoCampY) > Config:GetSetting('AutoCampRadius') ^ 2
+                    if outOfCamp then
+                        ImGui.PushStyleColor(ImGuiCol.Button, Globals.Constants.Colors.ConditionFailColor)
+                    else
+                        ImGui.BeginDisabled()
+                        ImGui.PushStyleColor(ImGuiCol.Button, ImGui.GetColorU32(ImGuiCol.Button))
+                    end
+                    if ImGui.Button("Return to Camp " .. Icons.FA_FREE_CODE_CAMP, -1, 25) and outOfCamp then
+                        self.TempSettings.ManualPullReturnRequested = true
+                    end
+                    ImGui.PopStyleColor()
+                    if not outOfCamp then ImGui.EndDisabled() end
+                elseif mq.TLO.Target() and Targeting.TargetIsType("NPC") then
                     if ImGui.Button("Pull Target " .. Icons.FA_BULLSEYE, -1, 25) then
                         self:SetPullTarget()
                     end
@@ -1874,7 +1923,7 @@ function Module:Render()
         local pullModeName = Config:GetSetting('PullMode')
         local isCampMode = pullModeName == "PullToCamp" or pullModeName == "ChainToCamp"
 
-        if #self.TempSettings.ValidPullAbilities > 0 then
+        if #self.TempSettings.ValidPullAbilities > 0 and not self:IsPullMode("Manual") then
             local pullAbility = Config:GetSetting('PullAbility')
             if not self.TempSettings.ValidPullAbilities[pullAbility] then pullAbility = 1 end
             ImGui.SetNextItemWidth(ImGui.GetWindowWidth() * 0.5)
@@ -2227,6 +2276,15 @@ function Module:Render()
                 end
             end
             ImGui.EndChild()
+        end
+
+        if self:IsPullMode("Manual") then
+            local returnOnAggro = Config:GetSetting('ManualReturnOnAggro')
+            local newReturnOnAggro = ImGui.Checkbox("Return on Aggro", returnOnAggro)
+            Ui.Tooltip("Automatically navigate back to camp when mobs appear on xtarget.")
+            if newReturnOnAggro ~= returnOnAggro then
+                Config:SetSetting('ManualReturnOnAggro', newReturnOnAggro)
+            end
         end
 
         local nextPull = Config:GetSetting('PullDelay') - (Globals.GetTimeSeconds() - self.TempSettings.LastPullOrCombatEnded)
@@ -3718,6 +3776,94 @@ function Module:CheckReturnAbort(attempt)
     return true
 end
 
+function Module:GiveTimeManual()
+    -- Always runs regardless of DoPull so we can set PULL_MANUAL_OUT (> 2) and
+    -- suppress the combat.lua camp leash even before the user presses Start Pulls.
+
+    local campData = Modules:ExecModule("Movement", "GetCampData")
+
+    if not campData.returnToCamp then
+        self:SetPullState(PullStates.PULL_IDLE, "No camp set")
+        return
+    end
+
+    local sx = campData.campSettings.AutoCampX
+    local sy = campData.campSettings.AutoCampY
+    local sz = campData.campSettings.AutoCampZ
+    local campRadius = Config:GetSetting('AutoCampRadius')
+    local inCamp = Math.GetDistanceSquared(mq.TLO.Me.X(), mq.TLO.Me.Y(), sx, sy) <= campRadius ^ 2
+
+    -- Keep PULL_MANUAL_OUT set (> 2) so the camp leash in combat.lua never
+    -- fights the player's manual movement, regardless of DoPull state.
+    if inCamp then
+        self:SetPullState(PullStates.PULL_MANUAL_OUT, "In camp")
+        return
+    end
+
+    self:SetPullState(PullStates.PULL_MANUAL_OUT, "Waiting to return")
+
+    local shouldReturn = false
+
+    if Config:GetSetting('ManualReturnOnAggro') and Targeting.GetXTHaterCount() > 0 then
+        -- Only return if at least one hater is outside camp radius; if all aggroed
+        -- mobs are already at camp the player can engage them without nav-ing back.
+        for _, haterId in ipairs(Targeting.GetXTHaterIDs()) do
+            local hater = mq.TLO.Spawn(haterId)
+            if hater() and Math.GetDistanceSquared(hater.X(), hater.Y(), sx, sy) > campRadius ^ 2 then
+                Logger.log_debug("PULL:Manual - Hater %d is outside camp, returning to camp", haterId)
+                shouldReturn = true
+                break
+            end
+        end
+    end
+
+    if self.TempSettings.ManualPullReturnRequested then
+        Logger.log_debug("PULL:Manual - Return to camp requested by command")
+        self.TempSettings.ManualPullReturnRequested = false
+        shouldReturn = true
+    end
+
+    if not shouldReturn then return end
+
+    if not mq.TLO.Navigation.MeshLoaded() then
+        Logger.log_warn("PULL:Manual - No nav mesh, cannot return to camp.")
+        return
+    end
+
+    -- Navigate back to camp (same blocking pattern as Normal mode)
+    self:SetPullState(PullStates.PULL_RETURN_TO_CAMP,
+        string.format("Camp Loc: %0.2f %0.2f %0.2f", sy, sx, sz))
+
+    Core.DoCmd("/squelch /attack off")
+    Movement:DoNav(false, "locyxz %0.2f %0.2f %0.2f log=off", sy, sx, sz)
+    mq.delay("5s", function() return mq.TLO.Navigation.Active() end)
+
+    while mq.TLO.Navigation.Active() do
+        if mq.TLO.Me.State():lower() == "feign" or mq.TLO.Me.Sitting() then
+            mq.TLO.Me.Stand()
+            Movement:DoNav(false, "locyxz %0.2f %0.2f %0.2f log=off", sy, sx, sz)
+            mq.delay("5s", function() return mq.TLO.Navigation.Active() end)
+        end
+        if mq.TLO.Navigation.Paused() then
+            Movement:DoNav(false, "pause")
+        end
+        Modules:ExecModule("Movement", "CheckStuck")
+        mq.doevents()
+        Events.DoEvents()
+        mq.delay(10)
+    end
+
+    if Math.GetDistanceSquared(mq.TLO.Me.X(), mq.TLO.Me.Y(), sx, sy) > campRadius ^ 2 then
+        Logger.log_warn("PULL:Manual - Failed to reach camp (dist %.0f) - stuck in the field",
+            math.sqrt(Math.GetDistanceSquared(mq.TLO.Me.X(), mq.TLO.Me.Y(), sx, sy)))
+        Comms.HandleAnnounce(Comms.FormatChatEvent("Pull", "None", "Manual pull failed to return to camp - manual intervention may be needed!"),
+            Config:GetSetting('PullAnnounceGroup'), Config:GetSetting('PullAnnounce'), Config:GetSetting('AnnounceToRaidIfInRaid'))
+    end
+
+    self:SetLastPullOrCombatEndedTimer()
+    self:SetPullState(PullStates.PULL_MANUAL_OUT, "In camp")
+end
+
 -- State Machine Ticks
 function Module:BuildPullContext()
     return {
@@ -3736,7 +3882,8 @@ function Module:RunEntryGates(ctx)
         Logger.log_verbose("PULL:GiveTime() we are in %s, not ready for pulling.", ctx.combatState)
         return false
     end
-    if (Globals.GetTimeSeconds() - self.TempSettings.LastPullOrCombatEnded) < Config:GetSetting('PullDelay') then
+    if (Globals.GetTimeSeconds() - self.TempSettings.LastPullOrCombatEnded) < Config:GetSetting('PullDelay')
+       and not self:IsPullMode("Manual") then
         Logger.log_verbose("PULL:GiveTime() waiting for Pull Delay, next attempt in %d seconds.",
             Config:GetSetting('PullDelay') - (Globals.GetTimeSeconds() - self.TempSettings.LastPullOrCombatEnded))
         return false
@@ -3770,6 +3917,13 @@ function Module:RunEntryGates(ctx)
         if #self.TempSettings.PullIgnoreTargets > 0 then
             self:ClearIgnoreList()
         end
+    end
+
+    -- Manual pull mode must run before the DoPull gate so it can suppress the
+    -- camp leash even when the user hasn't pressed Start Pulls.
+    if self:IsPullMode("Manual") then
+        self:GiveTimeManual()
+        return false
     end
 
     Logger.log_verbose("PULL:GiveTime() - DoPull: %s", Strings.BoolToColorString(Config:GetSetting('DoPull')))
