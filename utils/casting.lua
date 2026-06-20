@@ -2733,6 +2733,21 @@ function Casting.WaitCastFinish(targetId, bAllowDead, spellRange, castTime)
             return
         end
 
+        -- optional class-supplied interrupt: abort this cast if the situation changed
+        -- (e.g. cleric babysitting a charmed pet but a player just dropped low). The hook
+        -- gets the remaining cast time so it can choose to let a near-finished cast land.
+        -- Set Globals.StopCast so the outer RunCastLoop also bails instead of retrying;
+        -- class GiveTime clears it (and the hook) next tick.
+        if Globals.CastInterruptCheck then
+            local pingBuffer = (mq.TLO.EverQuest.Ping() * 20) + 1000
+            if Globals.CastInterruptCheck(targetId, maxWait - pingBuffer) then
+                Logger.log_debug("WaitCastFinish(): Interrupting %s via class interrupt hook.", currentCast)
+                Globals.StopCast = true
+                mq.TLO.Me.StopCast()
+                return
+            end
+        end
+
         if Globals.StopCast then
             mq.TLO.Me.StopCast()
             return

@@ -38,6 +38,11 @@ Globals.MyLooseCharmID                = 0
 Globals.SubmodulesLoaded              = false
 Globals.PauseMain                     = false
 Globals.StopCast                      = false
+-- optional one-shot interrupt hook: a function(targetId, remainingMs) set by a class
+-- config right before a situational cast; WaitCastFinish calls it each tick and StopCasts
+-- if it returns true (e.g. cleric pet Complete Heal yielding to a hurt player). Cleared
+-- by the caster's post_activate and reset every class GiveTime so it never leaks.
+Globals.CastInterruptCheck            = nil
 Globals.BackOffFlag                   = false
 Globals.RepositioningActive           = false
 Globals.RepositioningActiveSince      = 0

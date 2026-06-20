@@ -41,6 +41,12 @@ Module.CombatState                        = "None"
 Module.TempSettings                       = {}
 Module.TempSettings.CharmImmune           = {}
 Module.TempSettings.CharmTracker          = {}
+-- spawn ids we've intentionally dropped (Drop Charm & Kill): skip them in the scan until they die, but
+-- don't deny-list them, so the same mob is charmable again after it respawns. Cleared on death/zone.
+Module.TempSettings.NoCharmUntilDead      = {}
+-- set by the UI button / command; the actual drop sequence runs in GiveTime (the yieldable main loop),
+-- never inline in Render or a bind callback, because its mem/cast path uses mq.delay (can't yield there)
+Module.TempSettings.DropCharmRequested    = false
 Module.TempSettings.CharmAttemptId        = 0
 Module.TempSettings.ValidCharmAbilities   = {}
 Module.TempSettings.LastCharmAbilityCheck = 0
@@ -250,6 +256,22 @@ Module.CommandHandlers = {
             return true
         end,
     },
+    charmignore = {
+        usage = "/rgl charmignore",
+        about = "Drop the charm you currently hold from the keep set and Deny List it, so it isn't re-charmed or re-picked while in this zone.",
+        handler = function(self, arg)
+            self:IgnoreCurrentPet()
+            return true
+        end,
+    },
+    dropcharm = {
+        usage = "/rgl dropcharm",
+        about = "Run the class's Drop Charm sequence (dispel/invis) to release the current charm so the group can kill it; the mob stays charmable after it respawns.",
+        handler = function(self, arg)
+            self:RequestDropCharm()
+            return true
+        end,
+    },
     charmdeny = {
         usage = "/rgl charmdeny \"<name>\"",
         about = "Adds <name> (or your target) to the Charm Deny List.",
@@ -419,6 +441,11 @@ function Module:PruneStale()
         local spawn = mq.TLO.Spawn(id)
         if not spawn() or spawn.Dead() then self.TempSettings.CharmImmune[id] = nil end
     end
+    -- a dropped mob that's now dead/gone can be forgotten; a fresh spawn (new id) is charmable again
+    for id, _ in pairs(self.TempSettings.NoCharmUntilDead) do
+        local spawn = mq.TLO.Spawn(id)
+        if not spawn() or spawn.Dead() then self.TempSettings.NoCharmUntilDead[id] = nil end
+    end
 end
 
 -- clear the temp immune list only (re-test immunity); the tracker survives so charm pets persist across downtime
@@ -430,6 +457,7 @@ end
 function Module:ResetCharmStates()
     self:ResetCharmImmune()
     self.TempSettings.CharmTracker = {}
+    self.TempSettings.NoCharmUntilDead = {}
     Config:SetSetting('LastCharmPetID', 0)
 end
 
@@ -508,6 +536,7 @@ function Module:RebuildCharmLists()
         Abilities = self:FilterLoaded(charm and charm.Abilities),
         PreCharm  = self:FilterLoaded(charm and charm.PreCharm),
         Assist    = self:FilterLoaded(charm and charm.Assist),
+        DropCharm = self:FilterLoaded(charm and charm.DropCharm),
     }
     local order = Config:GetSetting('RotationEntryOrder') or {}
     Rotation.ApplyEntryOrder(self.TempSettings.CharmLists.PreCharm, order["CharmPreCharm"])
@@ -727,6 +756,144 @@ function Module:AddCCTarget(mobId)
     Config:SetSetting('LastCharmPetID', mobId)
 end
 
+-- Drop the charm we currently hold (or a just-broken tracked one) from the keep set and add its name
+-- to the Deny List, so PersistCharm won't re-grab it and the scan won't re-pick the same mob while
+-- we're in this zone. Use when we charmed a mob we don't actually want to keep. (The held pet keeps
+-- fighting until charm wears off; it just won't be re-acquired afterward - release it manually to drop it now.)
+function Module:IgnoreCurrentPet()
+    -- prefer the held pet; if the slot's already empty (just broke), fall back to a tracked charm
+    local petId = mq.TLO.Me.Pet.ID() or 0
+    if petId == 0 then petId = next(self.TempSettings.CharmTracker) or 0 end
+    if petId == 0 then
+        Logger.log_warn("\ayCharm: no current pet or tracked charm to ignore.")
+        return false
+    end
+
+    local name = mq.TLO.Spawn(petId).CleanName() or "Unknown"
+    -- a forcecharm on this mob would immediately re-acquire it; clear it so the ignore sticks
+    if Globals.ForceCharmID == petId then self:SetForceCharmId(0) end
+
+    self:RemoveCCTarget(petId)               -- stop persisting / re-grabbing this charm
+    self:AddMobToList("CharmDenyList", name) -- skip this mob (by name) for the rest of the zone
+    Logger.log_info("\awCharm: ignoring \at%s\aw (%d) - dropped from keep set and added to the Deny List.", name, petId)
+    return true
+end
+
+function Module:GetDropCharmAbilities()
+    return self:GetCharmLists().DropCharm
+end
+
+-- Fire one step of the drop-charm sequence on the held pet. Returns true only if the step actually cast.
+-- An `allowMem` spell/song step is a mem-and-cast fallback; it only succeeds when the engine permits
+-- memming (e.g. out of active combat - mid-combat mem is blocked by Casting.UseSpell). An `invis` step
+-- targets self and, after a brief wait for the charm to break, cancels the invis buff so the group can engage.
+function Module:DropCharmStep(entry, petId)
+    local spell = self:EntrySpell(entry)
+    if not self:EntryResolves(entry, spell) then return false end
+
+    local petSpawn = mq.TLO.Spawn(petId)
+    if entry.cond and not Core.SafeCallFunc("Charm DropCharm cond", entry.cond, self, self:EntryCondArg(entry, spell), petSpawn) then
+        return false
+    end
+
+    local entryType = (entry.type or ""):lower()
+    -- invis hides US (the safety path); it lands on self. dispel and the rest target the pet.
+    local castTarget = entry.invis and (mq.TLO.Me.ID() or 0) or petId
+
+    local fired
+    if entry.allowMem and (entryType == "spell" or entryType == "song") then
+        ---@cast spell MQSpell
+        fired = Casting.UseSpell(spell.RankName(), castTarget, true, false) and true or false
+    else
+        if not self:EntryReady(entry, spell) then return false end
+        if entryType ~= "ability" and type(spell) ~= "string" and (spell.MyCastTime() or 0) > 0 then self:StopCast() end
+        self:EntryCast(entry, spell, castTarget)
+        fired = true
+    end
+    if not fired then return false end
+
+    if entry.invis then
+        -- wait briefly for the charm to break (pet slot frees), then drop invis so we/the group can attack the mob
+        local buffName = (type(spell) ~= "string" and spell()) and spell.RankName() or entry.name
+        mq.delay(3000, function() return (mq.TLO.Me.Pet.ID() or 0) ~= petId end)
+        if mq.TLO.Me.Invis() and buffName then Core.DoCmd('/removebuff "%s"', buffName) end
+    end
+    return true
+end
+
+-- Queue a Drop Charm & Kill from the UI button / command. We only set a flag here: the actual sequence
+-- (DropCharmNow) casts via mq.delay, which CANNOT run on the ImGui render or bind thread ("cannot delay
+-- from non-yieldable threadstack"). GiveTime drains the flag on the next main-loop pump instead.
+function Module:RequestDropCharm()
+    if (mq.TLO.Me.Pet.ID() or 0) == 0 and next(self.TempSettings.CharmTracker) == nil then
+        Logger.log_warn("\ayCharm: no current pet to drop.")
+        return
+    end
+    self.TempSettings.DropCharmRequested = true
+    Logger.log_info("\awCharm: drop-charm queued; running on the next pump.")
+end
+
+-- "Drop Charm & Kill": release the charm we hold so the group can kill the mob now, WITHOUT deny-listing
+-- it (so the same mob is charmable again after it respawns). Runs the class's Charm.DropCharm priority
+-- list: the first usable step wins (e.g. gemmed dispel > invis AA > mem dispel > mem invis).
+-- MUST be called from the main loop (GiveTime), never from Render/a bind - it casts (mq.delay/yield).
+function Module:DropCharmNow()
+    local petId = mq.TLO.Me.Pet.ID() or 0
+    if petId == 0 then petId = next(self.TempSettings.CharmTracker) or 0 end
+    if petId == 0 then
+        Logger.log_warn("\ayCharm: no current pet to drop.")
+        return false
+    end
+    local name = mq.TLO.Spawn(petId).CleanName() or "Unknown"
+
+    -- stop persisting / re-grabbing, and suppress a re-charm of THIS spawn until it dies; do NOT deny-list it
+    if Globals.ForceCharmID == petId then self:SetForceCharmId(0) end
+    self:RemoveCCTarget(petId)
+    self.TempSettings.NoCharmUntilDead[petId] = true
+    Logger.log_info("\awCharm: dropping charm on \at%s\aw (%d) so the group can kill it.", name, petId)
+
+    local restoreTargetID = mq.TLO.Target.ID()
+    self:StopAttack()
+
+    local steps = self:GetDropCharmAbilities() or {}
+    if #steps == 0 then
+        Logger.log_warn("\ayCharm: no Charm.DropCharm sequence configured for this class - add one to your class config.")
+        Targeting.SetTarget(restoreTargetID, true)
+        return false
+    end
+
+    local fired = false
+    for _, entry in ipairs(steps) do
+        if self:EntryEnabled(entry, "DropCharm") and self:DropCharmStep(entry, petId) then
+            Logger.log_debug("\ayDropCharmNow :: fired %s", entry.name or "?")
+            fired = true
+            break
+        end
+    end
+    if fired then
+        -- only call assist once charm has ACTUALLY broken - don't force the group onto a pet we still hold
+        -- (e.g. an invis step that didn't break charm on this server). Dispel frees the pet slot promptly.
+        mq.delay(1500, function() return (mq.TLO.Me.Pet.ID() or 0) ~= petId end)
+        if (mq.TLO.Me.Pet.ID() or 0) ~= petId then
+            -- the freed mob has no aggro on the group, so the MA won't auto-pick it. Call the group/raid to
+            -- engage it: clear backoff and force-target the mob everywhere. forcetarget overrides the charm-pet
+            -- skip in combat targeting and auto-clears when the mob dies. (Mirrors /rgl callassist.)
+            local inRaid = (mq.TLO.Raid.Members() or 0) > 0
+            local scope = inRaid and "/dgraexecute" or "/dggaexecute"
+            Core.DoCmd("/squelch %s /rgl backoff off", scope)
+            Core.DoCmd("/squelch %s /rgl forcetarget %d", scope, petId)
+            Logger.log_info("\agDrop Charm:\ax calling %s assist on \ay%s\ax (%d).", inRaid and "raid" or "group", name, petId)
+        else
+            Logger.log_warn("\ayCharm: drop step cast but charm still holding %d - not calling assist yet.", petId)
+        end
+    else
+        Logger.log_warn("\ayCharm: no DropCharm step was usable (dispel not ready / can't mem in combat) - charm not dropped.")
+    end
+
+    Targeting.SetTarget(restoreTargetID, true)
+    return fired
+end
+
 -- live charm-buff timer on our pet (a BuffDuration timestamp); nil if no pet, no charm, or the buff has no duration (e.g. Dire Charm)
 function Module:GetCharmDuration()
     if (mq.TLO.Me.Pet.ID() or 0) == 0 then return nil end
@@ -844,6 +1011,7 @@ function Module:IsValidCharmTarget(mobId)
     if not spawn() or spawn.Dead() or Targeting.TargetIsType("corpse", spawn) then return false end   -- dead/corpse
     if (spawn.Master.Type() or "") ~= "" then return false end                                        -- already a pet (player- or NPC-owned) or charmed
     if Globals.CharmedPetIDs:contains(mobId) and not self:IsOwnKeptCharm(mobId) then return false end -- a peer's charm
+    if self.TempSettings.NoCharmUntilDead[mobId] then return false end                                -- intentionally dropped; leave it for the group to kill
     if self:IsCharmImmune(mobId) then return false end
     if self:IsMobInList("CharmDenyList", name, false) then return false end
     if self:HaveList("CharmAllowList") and not self:IsMobInList("CharmAllowList", name, false) then return false end
@@ -1110,6 +1278,13 @@ function Module:GiveTime()
 
     if Core.CanCharm() then self:SetValidCharmAbilities() end
 
+    -- drain a queued Drop Charm & Kill here (main loop = yieldable); do it before the IsCharming/nav/hover
+    -- gates and DoCharm's pet-slot-full early return, so holding a pet doesn't prevent the drop
+    if Core.CanCharm() and self.TempSettings.DropCharmRequested then
+        self.TempSettings.DropCharmRequested = false
+        self:DropCharmNow()
+    end
+
     -- charm doesn't survive a zone (and zone-local ids get reused), so drop a tracker left from the prior zone before anything reads it
     local zoneId = mq.TLO.Zone.ID() or 0
     if zoneId > 0 and next(self.TempSettings.CharmTracker) ~= nil and self.TempSettings.CharmZoneId ~= zoneId then
@@ -1282,6 +1457,21 @@ function Module:Render()
         if ImGui.Button("Clear Force Charm", buttonWidth, 28) then self:SetForceCharmId(0) end
         ImGui.EndDisabled()
 
+        local havePetToIgnore = (mq.TLO.Me.Pet.ID() or 0) > 0 or next(self.TempSettings.CharmTracker) ~= nil
+        ImGui.BeginDisabled(not havePetToIgnore)
+        if ImGui.Button("Ignore Current Pet", buttonWidth, 28) then self:IgnoreCurrentPet() end
+        ImGui.EndDisabled()
+        Ui.Tooltip("Drop the charm you're holding from the keep set and add it to the Deny List, so it isn't re-charmed or re-picked while in this zone.\n(It keeps fighting until charm wears off - release it manually to drop it now.)")
+
+        ImGui.SameLine()
+        local haveDropSeq = #(self:GetDropCharmAbilities() or {}) > 0
+        ImGui.BeginDisabled(not havePetToIgnore or not haveDropSeq)
+        if ImGui.Button("Drop Charm & Kill", buttonWidth, 28) then self:RequestDropCharm() end
+        ImGui.EndDisabled()
+        Ui.Tooltip(haveDropSeq
+            and "Run the Drop Charm sequence (dispel/invis) to release the charm now so the group can kill it.\nThe mob is NOT deny-listed - it's charmable again after it respawns."
+            or "No Charm.DropCharm sequence is configured for this class. Add one to your class config to enable this.")
+
         ImGui.Separator()
     end
 
@@ -1291,7 +1481,7 @@ function Module:Render()
         if charmLists then
             local enabled = Config:GetSetting('EnabledCharmEntries') or {}
             local changed = false
-            for _, listName in ipairs({ "PreCharm", "Assist", }) do
+            for _, listName in ipairs({ "PreCharm", "Assist", "DropCharm", }) do
                 local list = charmLists[listName]
                 if list and #list > 0 then
                     ImGui.Text(listName)

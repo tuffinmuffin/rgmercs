@@ -3,7 +3,55 @@ local Casting      = require("utils.casting")
 local Combat       = require('utils.combat')
 local Config       = require('utils.config')
 local Core         = require("utils.core")
+local Globals      = require("utils.globals")
+local Logger       = require("utils.logger")
 local Targeting    = require("utils.targeting")
+
+----------------------------------------------------------------------------------------
+-- Charmed-pet Complete Heal helpers
+--
+-- A charmed pet is an NPC the group/raid controls; if it dies the charmer loses their
+-- "tank/dps", so a cleric can babysit one with Complete Heal during downtime and/or
+-- combat. Globals.CharmedPetIDs is the addon-wide set of charmed pet ids (every charmer
+-- broadcasts its own id via heartbeat; charm.lua aggregates the set every tick for ALL
+-- classes), so we treat it as the authoritative "is this pet charmed" check rather than
+-- guessing from spawn data. Player heals always take priority: we won't START a pet CH
+-- while a player is below the safety pct, and WaitCastFinish will interrupt an in-progress
+-- pet CH (see pre_activate, below) if a player drops low with more than 2s of cast left.
+----------------------------------------------------------------------------------------
+
+-- Scope: our own group (Group.Member). A charmed pet we can actually reach/heal is
+-- effectively always owned by a groupmate, and a raiding cleric heals their assigned
+-- group - this mirrors how the addon's own buff code iterates Group.Member even in raids.
+
+--- Collect ids of charmed groupmate pets at or below pctThreshold HP.
+---@param pctThreshold number Only return pets whose PctHPs is <= this.
+---@return table ids Array of charmed pet spawn ids needing a heal.
+local function getHurtCharmedPetIds(pctThreshold)
+    local ids = {}
+    for i = 1, (mq.TLO.Group.Members() or 0) do
+        local m = mq.TLO.Group.Member(i)
+        local pet = m and m() and m.Pet
+        if pet and pet() and (pet.ID() or 0) > 0 and not pet.Dead()
+            and Globals.CharmedPetIDs:contains(pet.ID())
+            and (pet.PctHPs() or 100) <= pctThreshold then
+            table.insert(ids, pet.ID())
+        end
+    end
+    return ids
+end
+
+--- True if any living groupmate (or me) is below pct HP - pet-heal yields to players.
+---@param pct number HP percent threshold.
+---@return boolean
+local function anyPlayerBelowPct(pct)
+    if (mq.TLO.Me.PctHPs() or 100) < pct then return true end
+    for i = 1, (mq.TLO.Group.Members() or 0) do
+        local m = mq.TLO.Group.Member(i)
+        if m and m() and not m.Dead() and not m.OtherZone() and (m.PctHPs() or 100) < pct then return true end
+    end
+    return false
+end
 
 local _ClassConfig = {
     _version              = "2.1 - Live",
@@ -1133,6 +1181,21 @@ local _ClassConfig = {
                 return combat_state == "Downtime" and Core.CombatActionsCheck() and Casting.OkayToBuff()
             end,
         },
+        { -- Keep charmed group/raid pets topped off with Complete Heal (see helpers at top of file)
+            name = 'PetHeal',
+            state = 1,
+            steps = 1,
+            load_cond = function() return Config:GetSetting('DoPetCH') > 1 end,
+            targetId = function(self) return getHurtCharmedPetIds(Config:GetSetting('PetCHPct')) end,
+            cond = function(self, combat_state)
+                local mode = Config:GetSetting('DoPetCH') -- 1 Off, 2 Downtime, 3 Combat, 4 Both
+                local active = (combat_state == "Downtime" and (mode == 2 or mode == 4))
+                    or (combat_state == "Combat" and (mode == 3 or mode == 4))
+                if not active or not Core.CombatActionsCheck() then return false end
+                -- yield entirely to the group: don't START a pet CH while a player is hurt
+                return not anyPlayerBelowPct(Config:GetSetting('PetCHPlayerSafetyPct'))
+            end,
+        },
         {
             name = 'Burn',
             state = 1,
@@ -1176,6 +1239,30 @@ local _ClassConfig = {
         },
     },
     ['Rotations']         = {
+        ['PetHeal'] = {
+            {
+                name = "CompleteHeal",
+                type = "Spell",
+                pre_activate = function(self, spell)
+                    -- Arm a one-shot mid-cast interrupt: if a player drops below the safety
+                    -- pct while we're babysitting a pet AND there is more than 2s of cast time
+                    -- left, WaitCastFinish will StopCast so we can pivot to the player. Cleared
+                    -- in post_activate (and every class GiveTime) so it can't affect later casts.
+                    local safetyPct = Config:GetSetting('PetCHPlayerSafetyPct')
+                    Globals.CastInterruptCheck = function(_, remainingMs)
+                        if (remainingMs or 0) <= 2000 then return false end -- nearly done, let it land
+                        return anyPlayerBelowPct(safetyPct)
+                    end
+                end,
+                post_activate = function(self, spell, success)
+                    Globals.CastInterruptCheck = nil
+                end,
+                cond = function(self, spell, target)
+                    if not (spell and spell()) then return false end
+                    return (target.PctHPs() or 100) <= Config:GetSetting('PetCHPct')
+                end,
+            },
+        },
         ['ManaRestore'] = {
             {
                 name = "Veturika's Perseverance",
@@ -1526,7 +1613,7 @@ local _ClassConfig = {
                 { name = "Renewal",         cond = function(self) return mq.TLO.Me.Level() >= 70 and mq.TLO.Me.Level() < 101 end, },            -- Level 80-95
                 { name = "Renewal2",        cond = function(self) return mq.TLO.Me.Level() >= 80 and mq.TLO.Me.Level() < 101 end, },            -- Level 80+
                 { name = "RemedyHeal",      cond = function(self) return mq.TLO.Me.Level() < 70 end, },
-                { name = "CompleteHeal",    cond = function(self) return Config:GetSetting('DoCompleteHeal') and mq.TLO.Me.Level() < 80 end, }, -- Level 39
+                { name = "CompleteHeal",    cond = function(self) return (Config:GetSetting('DoCompleteHeal') and mq.TLO.Me.Level() < 80) or Config:GetSetting('DoPetCH') > 1 end, }, -- Level 39 (also kept memmed for charmed-pet CH at any level)
                 { name = "ClutchHeal", },                                                                                                       -- Level 77+
                 { name = "SingleElixir",    cond = function(self) return Config:GetSetting('DoHealOverTime') and mq.TLO.Me.Level() < 83 end, }, -- Level 19-79
                 { name = "GroupElixir",     cond = function(self) return Config:GetSetting('DoHealOverTime') end, },                            -- Level 60+, gets better from 70 on, this may be overwritten before 75
@@ -1803,6 +1890,54 @@ local _ClassConfig = {
                 end
                 return false, ""
             end,
+        },
+        ['DoPetCH']           = {
+            DisplayName = "Pet Complete Heal",
+            Group = "Abilities",
+            Header = "Recovery",
+            Category = "General Healing",
+            Index = 103,
+            Type = "Combo",
+            ComboOptions = { 'Off', 'Downtime Only', 'Combat Only', 'In and Out of Combat', },
+            Default = 1,
+            Min = 1,
+            Max = 4,
+            RequiresLoadoutChange = true, -- used as a load condition (keeps Complete Heal memmed)
+            Tooltip = "Keep a groupmate's charmed pet topped off with Complete Heal, and choose when this is active.",
+            ConfigType = "Advanced",
+            FAQ = "How do I keep a charmed pet alive with my Cleric?",
+            Answer =
+                "Set 'Pet Complete Heal' on the Spells and Abilities tab to Downtime, Combat, or both.\n" ..
+                "We will cast Complete Heal on any charmed pet in your group that drops to the 'Pet CH Pct'.\n" ..
+                "Player heals always come first: we will not start a pet heal while a groupmate is below the " ..
+                "'Pet CH Player Safety Pct', and we will interrupt an in-progress pet heal (if it has more than " ..
+                "2 seconds left) when a player drops below that threshold.",
+        },
+        ['PetCHPct']          = {
+            DisplayName = "Pet CH Pct",
+            Group = "Abilities",
+            Header = "Recovery",
+            Category = "General Healing",
+            Index = 104,
+            Default = 80,
+            Min = 1,
+            Max = 99,
+            Tooltip = "Cast Complete Heal on a charmed pet at or below this HP%.",
+            ConfigType = "Advanced",
+        },
+        ['PetCHPlayerSafetyPct'] = {
+            DisplayName = "Pet CH Player Safety Pct",
+            Group = "Abilities",
+            Header = "Recovery",
+            Category = "General Healing",
+            Index = 105,
+            Default = 90,
+            Min = 1,
+            Max = 100,
+            Tooltip =
+                "If any groupmate drops below this HP%, suspend charmed-pet healing (and interrupt an\n" ..
+                "in-progress pet Complete Heal that has more than 2 seconds left) so we can focus on players.",
+            ConfigType = "Advanced",
         },
         ['KeepCureMemmed']    = {
             DisplayName = "Mem Cure:",

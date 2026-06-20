@@ -389,25 +389,31 @@ function Module:New()
 end
 
 function Module:ChaseOn(nameParam)
+    local myName = mq.TLO.Me.CleanName()
     local currentChase = Config:GetSetting('ChaseTarget')
+
+    -- A stored chase target pointing at ourselves is stale/invalid (e.g. an earlier MA fallback
+    -- resolved to self when no valid assist was found). Ignore it so we re-resolve against the MA
+    -- below instead of getting permanently stuck refusing to chase.
+    if currentChase == myName then currentChase = "" end
 
     -- if no name passed, use current chase target
     local targetName = nameParam or (currentChase ~= "" and currentChase)
 
-    -- Chasing ourselves (e.g. a group-wide "chase <anchor>" broadcast that names us) means we ARE
-    -- the anchor: hold position and turn chase off instead of redirecting to the Main Assist, so the
-    -- anchor doesn't run off following its MA.
-    if targetName == mq.TLO.Me.CleanName() then
+    -- if no current chase target, use MA
+    local chaseTarget = targetName and mq.TLO.Spawn("pc =" .. targetName) or Core.GetMainAssistSpawn()
+
+    -- Chasing ourselves (a group-wide "chase <anchor>" broadcast that names us, or an MA that
+    -- resolves to self) means we ARE the anchor: hold position and turn chase off instead of
+    -- redirecting to/looping on ourselves.
+    if chaseTarget and chaseTarget() and chaseTarget.CleanName() == myName then
         Logger.log_warn("\ayWarning: Attempting to chase yourself, stopping chase instead.")
         self:CampOff()
         self:ChaseOff()
         return
     end
 
-    -- if no current chase target, use MA
-    local chaseTarget = targetName and mq.TLO.Spawn("pc =" .. targetName) or Core.GetMainAssistSpawn()
-
-    if chaseTarget and chaseTarget() and chaseTarget.ID() > 0 and chaseTarget.ID() ~= mq.TLO.Me.ID() then
+    if chaseTarget and chaseTarget() and chaseTarget.ID() > 0 then
         self:CampOff()
         Config:SetSetting('ChaseOn', true)
         Config:SetSetting('ChaseTarget', chaseTarget.CleanName())

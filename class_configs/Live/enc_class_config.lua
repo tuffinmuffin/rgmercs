@@ -591,6 +591,11 @@ local _ClassConfig    = {
             "Cancel Magic",        -- Level 7
             "Taper Enchantment",   -- Level 1
         },
+        -- self-invis line for the Charm.DropCharm "mem invis" fallback step (verify names/levels for your server)
+        ['InvisSpell'] = {
+            "Improved Invisibility", -- higher-level, longer duration
+            "Invisibility",          -- Level 4
+        },
         ['TashSpell'] = {
             "Tashan XVII",            -- Level 127
             "Roar of Tashan",         -- Level 122
@@ -919,6 +924,18 @@ local _ClassConfig    = {
         ['Assist']    = {
             { name = "PBAEStunSpell", type = "Spell", cond = function(self, spell, target) return Targeting.TargetNotStunned() and Targeting.InSpellRange(spell, target) end, },
             { name = "TashSpell",     type = "Spell", cond = function(self, spell, target) return Casting.DetSpellCheck(spell, target) end, },
+        },
+        -- "Drop Charm & Kill" sequence (button / /rgl dropcharm): release the held charm so the group can kill
+        -- the mob now. It is NOT deny-listed, so the same mob is charmable again after it respawns. The first
+        -- usable step wins, in order. `allowMem = true` mems-and-casts (only works when not in active combat -
+        -- mid-combat memming is blocked). `invis = true` casts on self and drops invis once the charm breaks.
+        ['DropCharm'] = {
+            { type = "Spell", name = "Dispel", },                  -- 1) dispel the charm if it's already memmed & ready
+            -- 2) invis AA: set name to YOUR enchanter invis AA, then uncomment (verify the exact AA name in-game):
+            -- { type = "AA", name = "Your Invis AA", invis = true, },
+            { type = "Spell", name = "Dispel", allowMem = true, }, -- 3) mem + cast dispel (out of combat)
+            -- 4) mem + cast self-invis (uses the InvisSpell list added below; verify the names), then uncomment:
+            -- { type = "Spell", name = "InvisSpell", allowMem = true, invis = true, },
         },
     },
     ['RotationOrder'] = {

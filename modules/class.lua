@@ -2345,6 +2345,7 @@ function Module:GiveTime()
     end
 
     Globals.StopCast = false
+    Globals.CastInterruptCheck = nil -- a config arms this just-in-time via pre_activate; never let one leak across ticks
 
     if self:ProcessQueuedEvents() then
         -- more to do next frame.
