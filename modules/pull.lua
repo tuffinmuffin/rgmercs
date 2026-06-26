@@ -238,6 +238,23 @@ Module.Constants.PullAbilities      = {
         end,
     },
     {
+        id = "RangedMeleeFallback",
+        Type = "Special",
+        DisplayName = "Ranged w/ Melee Fallback",
+        AbilityRange = function()
+            local range = mq.TLO.Me.Inventory("ranged").Range() or 0
+            if mq.TLO.Me.Inventory("ranged").Type() == 'Archery' or mq.TLO.Me.Inventory("ranged").Type() == 'Bow' then
+                range = range + (mq.TLO.Me.Inventory("ammo").Range() or 0)
+            end
+            return range
+        end,
+        cond = function(self)
+            local rangedType = (mq.TLO.Me.Inventory("ranged").Type() or ""):lower()
+            local rangedTypes = Set.new({ "archery", "bow", "throwingv1", "throwing", "throwingv2", "ammo", })
+            return rangedTypes:contains(rangedType)
+        end,
+    },
+    {
         id = "Kick",
         Type = "Ability",
         DisplayName = "Kick",
@@ -310,6 +327,22 @@ Module.Constants.EngageDescriptors  = {
             Core.DoCmd("/ranged %d", attempt.targetId)
         end,
     },
+    RangedMeleeFallback = {
+        approach = 'halfRange',
+        stuckCheck = true,
+        verbose = "Waiting on ranged/melee pull to finish... %s",
+        verboseShowsSuccess = true,
+        action = function(self, attempt)
+            local dist = Targeting.GetTargetDistance()
+            local minRangedDist = Config:GetSetting('RangedFallbackMinRange')
+            if dist <= minRangedDist then
+                Logger.log_verbose("PULL: Ranged/Melee - too close (%.0f <= %d), using melee", dist, minRangedDist)
+                Core.DoCmd("/attack")
+            else
+                Core.DoCmd("/ranged %d", attempt.targetId)
+            end
+        end,
+    },
     AutoAttack = {
         approach = 'halfRange',
         fireBeforeApproach = true,
@@ -365,6 +398,7 @@ local PullStates                    = Module.Constants.PullStates -- hot-path al
 Module.TempSettings.PullState                 = PullStates.PULL_IDLE
 Module.TempSettings.PullStateReason           = ""
 Module.TempSettings.ManualPullReturnRequested = false
+Module.TempSettings.ManualCampExitHaters      = nil   -- hater ID snapshot taken on camp exit
 
 Module.Constants.PullStateHandlers  = {
     [PullStates.PULL_IDLE]               = 'PreAttemptTick',
@@ -607,6 +641,18 @@ Module.DefaultConfig                = {
         Index = 12,
         Tooltip = "Use the pull movement buffs provided by your class config while pulling.",
         Default = true,
+    },
+    ['RangedFallbackMinRange']                 = {
+        DisplayName = "Ranged Fallback Min Range",
+        Group = "Movement",
+        Header = "Pulling",
+        Category = "Pull Rules",
+        Index = 10,
+        Tooltip = "Ranged w/ Melee Fallback: Switch to AutoAttack when the pull target is within this distance (too close for ranged).",
+        Default = 15,
+        Min = 5,
+        Max = 50,
+        ConfigType = "Advanced",
     },
     -- Distance
     ['PullRadius']                             = {
@@ -3796,8 +3842,20 @@ function Module:GiveTimeManual()
     -- Keep PULL_MANUAL_OUT set (> 2) so the camp leash in combat.lua never
     -- fights the player's manual movement, regardless of DoPull state.
     if inCamp then
+        self.TempSettings.ManualCampExitHaters = nil  -- reset snapshot on camp entry
         self:SetPullState(PullStates.PULL_MANUAL_OUT, "In camp")
         return
+    end
+
+    -- Snapshot haters at the moment of camp exit so we can tell new pulls from
+    -- existing fight mobs (e.g. a fleeing mob that wandered outside camp radius).
+    if not self.TempSettings.ManualCampExitHaters then
+        local snapshot = {}
+        for _, id in ipairs(Targeting.GetXTHaterIDs()) do
+            snapshot[id] = true
+        end
+        self.TempSettings.ManualCampExitHaters = snapshot
+        Logger.log_debug("PULL:Manual - Left camp, snapshotted %d existing hater(s)", Targeting.GetXTHaterCount())
     end
 
     self:SetPullState(PullStates.PULL_MANUAL_OUT, "Waiting to return")
@@ -3805,12 +3863,14 @@ function Module:GiveTimeManual()
     local shouldReturn = false
 
     if Config:GetSetting('ManualReturnOnAggro') and Targeting.GetXTHaterCount() > 0 then
-        -- Only return if at least one hater is outside camp radius; if all aggroed
-        -- mobs are already at camp the player can engage them without nav-ing back.
+        -- Only trigger for haters that are NEW since leaving camp and outside the
+        -- camp radius. Mobs that were already aggroed (e.g. a fleeing fight mob)
+        -- don't count, preventing rubberbanding during normal in-camp combat.
         for _, haterId in ipairs(Targeting.GetXTHaterIDs()) do
             local hater = mq.TLO.Spawn(haterId)
-            if hater() and Math.GetDistanceSquared(hater.X(), hater.Y(), sx, sy) > campRadius ^ 2 then
-                Logger.log_debug("PULL:Manual - Hater %d is outside camp, returning to camp", haterId)
+            if hater() and not self.TempSettings.ManualCampExitHaters[haterId]
+               and Math.GetDistanceSquared(hater.X(), hater.Y(), sx, sy) > campRadius ^ 2 then
+                Logger.log_debug("PULL:Manual - New hater %d outside camp, returning", haterId)
                 shouldReturn = true
                 break
             end
@@ -3834,11 +3894,16 @@ function Module:GiveTimeManual()
     self:SetPullState(PullStates.PULL_RETURN_TO_CAMP,
         string.format("Camp Loc: %0.2f %0.2f %0.2f", sy, sx, sz))
 
+    -- Break out of melee before running; suppress attack throughout the return
+    -- so event handlers can't re-enable it while we're fleeing to camp.
+    Core.DoCmd("/squelch /stick off")
     Core.DoCmd("/squelch /attack off")
+    Core.DoCmd("/squelch /stopcast")
     Movement:DoNav(false, "locyxz %0.2f %0.2f %0.2f log=off", sy, sx, sz)
     mq.delay("5s", function() return mq.TLO.Navigation.Active() end)
 
     while mq.TLO.Navigation.Active() do
+        Core.DoCmd("/squelch /attack off")
         if mq.TLO.Me.State():lower() == "feign" or mq.TLO.Me.Sitting() then
             mq.TLO.Me.Stand()
             Movement:DoNav(false, "locyxz %0.2f %0.2f %0.2f log=off", sy, sx, sz)
@@ -4388,6 +4453,8 @@ function Module:BeginEngage(ctx)
         engageKey = 'Face'
     elseif abilityId == self.TempSettings.PullAbilityIDToName.Ranged then
         engageKey = 'Ranged'
+    elseif abilityId == self.TempSettings.PullAbilityIDToName.RangedMeleeFallback then
+        engageKey = 'RangedMeleeFallback'
     elseif abilityId == self.TempSettings.PullAbilityIDToName.AutoAttack then
         engageKey = 'AutoAttack'
     elseif attempt.ability then
