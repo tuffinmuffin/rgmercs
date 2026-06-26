@@ -1649,7 +1649,7 @@ local _ClassConfig = {
                 { name = "HealNuke3",       cond = function(self) return Config:GetSetting('InterContraChoice') == 1 end, },
                 { name = "NukeHeal3",       cond = function(self) return Config:GetSetting('InterContraChoice') == 3 end, },
                 { name = "Renewal3",        cond = function(self) return mq.TLO.Me.Level() < 101 end, },
-                { name = "RezSpell",        cond = function(self) return not Casting.CanUseAA('Blessing of Resurrection') end, },
+                { name = "RezSpell",        cond = function(self) return not Casting.CanUseAA('Blessing of Resurrection') and not mq.TLO.FindItem("=Water Sprinkler of Nem Ankh")() end, },
             },
         },
     },
