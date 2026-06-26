@@ -626,10 +626,9 @@ local _ClassConfig    = {
             "Tears of Zykean",    -- Level 90
             "Tears of Xadrith",   -- Level 85
             "Tears of Qandieal",  -- Level 80
-            "Torment of Scio",    -- Level 63
-            "Torment of Argli",   -- Level 56
             "Scryer's Trespass",  -- Level 52
-            "Wandering Mind",     -- Level 38
+            --"Theft of Thought",   -- Level 50
+            --"Wandering Mind",     -- Level 38
             "Mana Sieve",         -- Level 30
         },
         ['DichoSpell'] = {
@@ -663,7 +662,7 @@ local _ClassConfig    = {
             "Shallow Breath",     -- Level 1
         },
         ['MindDot'] = {
-            -- DoT 2 --  >= LVL70
+            -- DoT 2 --  >= LVL56
             "Mind Shatter XV", -- Level 130
             "Mind Whirl",      -- Level 125
             "Mind Vortex",     -- Level 120
@@ -677,6 +676,8 @@ local _ClassConfig    = {
             "Mind Oscillate",  -- Level 80
             "Mind Phobiate",   -- Level 75
             "Mind Shatter",    -- Level 70
+            "Torment of Scio", -- Level 63
+            "Torment of Argli",-- Level 56
         },
         ['ConstrictionDot'] = {
             ---DoT 3 -- >= LVL89
