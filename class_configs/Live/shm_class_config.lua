@@ -256,8 +256,8 @@ local _ClassConfig = {
             "Turgur's Insects",     -- Level 51, Can save mana by continuing to use Togor's on group mobs, but this is problematic for automation. Not worth splitting the entry.
             "Togor's Insects",      -- Level 38
             "Tagar's Insects",      -- Level 27
-            -- "Walking Sleep",     -- Level 13, Too much mana with little benefit at these levels
-            -- "Drowsy",            -- Level 5, Too much mana with little benefit at these levels
+            "Waking Sleep",      -- Level 13
+            "Drowsy",            -- Level 5
         },
         ['DiseaseSlow'] = {
             "Cloud of Grummus",  -- Level 61

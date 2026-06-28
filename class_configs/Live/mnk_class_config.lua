@@ -624,6 +624,14 @@ local _ClassConfig = {
                 name = "Tiger Claw",
                 type = "Ability",
             },
+            -- Low priority fallback; remove once Mend skill level is high enough
+            {
+                name = "Mend",
+                type = "Ability",
+                cond = function(self, abilityName)
+                    return Config:GetSetting('DoMend') and mq.TLO.Me.PctHPs() < Config:GetSetting('MendHP')
+                end,
+            },
         },
         ['Precision'] = {
             {
@@ -715,6 +723,26 @@ local _ClassConfig = {
             Tooltip = "Click your chest item during burns.",
             Default = mq.TLO.MacroQuest.BuildName() ~= "Emu",
             ConfigType = "Advanced",
+        },
+        ['DoMend']         = {
+            DisplayName = "Use Mend",
+            Group = "Abilities",
+            Header = "Utility",
+            Category = "Combat",
+            Index = 103,
+            Tooltip = "Use Mend during combat when HP falls below the threshold. Remove once Mend skill is high.",
+            Default = true,
+        },
+        ['MendHP']         = {
+            DisplayName = "Mend HP%",
+            Group = "Abilities",
+            Header = "Utility",
+            Category = "Combat",
+            Index = 104,
+            Tooltip = "HP% at which to use Mend during combat.",
+            Default = 80,
+            Min = 1,
+            Max = 100,
         },
         ['DoCoating']      = {
             DisplayName = "Use Coating",

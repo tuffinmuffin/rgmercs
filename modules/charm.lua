@@ -108,6 +108,28 @@ Module.DefaultConfig                      = {
         Tooltip     = "Help lock a groupmate's loose charm with a configured ability (if your class has one).",
         ConfigType  = "Advanced",
     },
+    ['RecharmTimeout']                         = {
+        DisplayName = "Recharm Timeout (s)",
+        Group       = "Abilities",
+        Header      = "Charm",
+        Category    = "Charm General",
+        Index       = 4,
+        Default     = 0,
+        Min         = 0,
+        Max         = 120,
+        Tooltip     = "If a loose charm has been uncharmed for this many seconds, give it to the group to kill. 0 = never give up.",
+        ConfigType  = "Advanced",
+    },
+    ['KillOnBreakOOM']                         = {
+        DisplayName = "Kill on Break (No Mana)",
+        Group       = "Abilities",
+        Header      = "Charm",
+        Category    = "Charm General",
+        Index       = 5,
+        Default     = false,
+        Tooltip     = "If you don't have enough mana to recast the charm spell when charm breaks, give the mob to the group to kill instead of waiting.",
+        ConfigType  = "Advanced",
+    },
     -- Targets
     ['AutoLevelRangeCharm']                    = {
         DisplayName = "Auto Level Range",
@@ -894,6 +916,21 @@ function Module:DropCharmNow()
     return fired
 end
 
+-- Give up on recharming: clear the tracker, suppress re-charm until the mob dies, and call the group to engage it.
+function Module:AbandonCharm(id, reason)
+    local spawn = mq.TLO.Spawn(id)
+    local name = (spawn and spawn() and spawn.CleanName()) or "Unknown"
+    Logger.log_info("\awCharm: abandoning \at%s\aw (%d) - %s; handing to group.", name, id, reason or "?")
+    if Globals.ForceCharmID == id then self:SetForceCharmId(0) end
+    self:RemoveCCTarget(id)
+    self.TempSettings.NoCharmUntilDead[id] = true
+    local inRaid = (mq.TLO.Raid.Members() or 0) > 0
+    local scope = inRaid and "/dgraexecute" or "/dggaexecute"
+    Core.DoCmd("/squelch %s /rgl backoff off", scope)
+    Core.DoCmd("/squelch %s /rgl forcetarget %d", scope, id)
+    Logger.log_info("\agCharm Abandon:\ax calling %s assist on \ay%s\ax (%d).", inRaid and "raid" or "group", name, id)
+end
+
 -- live charm-buff timer on our pet (a BuffDuration timestamp); nil if no pet, no charm, or the buff has no duration (e.g. Dire Charm)
 function Module:GetCharmDuration()
     if (mq.TLO.Me.Pet.ID() or 0) == 0 then return nil end
@@ -1203,6 +1240,7 @@ end
 -- poll the broken pet: announce + mark loose (broadcast) or clear if it died
 function Module:DetectBreaks()
     local petId = mq.TLO.Me.Pet.ID() or 0
+    local toAbandon = {}
     for id, data in pairs(self.TempSettings.CharmTracker) do
         if id ~= petId and not data.loose then
             local spawn = mq.TLO.Spawn(id)
@@ -1212,10 +1250,21 @@ function Module:DetectBreaks()
                     Logger.log_debug("\ayDetectBreaks :: charm broke on %d but forcecharm targets %d - abandoning", id, Globals.ForceCharmID)
                     self:RemoveCCTarget(id)
                 else
-                    data.loose = true
-                    Logger.log_debug("\ayDetectBreaks :: charm broke on \at%s\ay (%d) - marking loose", spawn.CleanName() or "?", id)
-                    Comms.HandleAnnounce(Comms.FormatChatEvent("Charm Broken", spawn.CleanName() or "?", mq.TLO.Me.DisplayName()),
-                        Config:GetSetting('CharmAnnounceGroup'), Config:GetSetting('CharmAnnounce'), Config:GetSetting('AnnounceToRaidIfInRaid'))
+                    -- check mana: if KillOnBreakOOM is on and we can't afford to recast, abandon immediately
+                    local entry = self:GetSelectedCharmAbility()
+                    local spell = entry and self:EntrySpell(entry)
+                    local manaCost = (spell and type(spell) ~= "string" and spell() and spell.Mana()) or 0
+                    local oomKill = Config:GetSetting('KillOnBreakOOM') and manaCost > 0 and (mq.TLO.Me.CurrentMana() or 0) < manaCost
+                    if oomKill then
+                        Logger.log_debug("\ayDetectBreaks :: charm broke on \at%s\ay (%d) and can't afford recharm (%d/%d mana) - abandoning", spawn.CleanName() or "?", id, mq.TLO.Me.CurrentMana() or 0, manaCost)
+                        toAbandon[#toAbandon + 1] = { id = id, reason = "not enough mana to recharm", }
+                    else
+                        data.loose = true
+                        data.looseAt = Globals.GetTimeMS()
+                        Logger.log_debug("\ayDetectBreaks :: charm broke on \at%s\ay (%d) - marking loose", spawn.CleanName() or "?", id)
+                        Comms.HandleAnnounce(Comms.FormatChatEvent("Charm Broken", spawn.CleanName() or "?", mq.TLO.Me.DisplayName()),
+                            Config:GetSetting('CharmAnnounceGroup'), Config:GetSetting('CharmAnnounce'), Config:GetSetting('AnnounceToRaidIfInRaid'))
+                    end
                 end
             else
                 Logger.log_debug("\ayDetectBreaks :: tracked charm %d gone or dead - dropping", id)
@@ -1223,6 +1272,7 @@ function Module:DetectBreaks()
             end
         end
     end
+    for _, a in ipairs(toAbandon) do self:AbandonCharm(a.id, a.reason) end
 end
 
 function Module:DoCharm()
@@ -1237,6 +1287,19 @@ function Module:DoCharm()
 
     local target = self:CurrentCharmTarget()
     if target == 0 then return end
+
+    -- recharm timeout: if the loose charm has been uncharmed for too long, hand it to the group
+    local timeoutSecs = Config:GetSetting('RecharmTimeout')
+    if timeoutSecs > 0 then
+        local data = self.TempSettings.CharmTracker[target]
+        if data and data.loose and data.looseAt then
+            local elapsed = (Globals.GetTimeMS() - data.looseAt) / 1000
+            if elapsed >= timeoutSecs then
+                self:AbandonCharm(target, string.format("loose for %.0fs (limit %ds)", elapsed, timeoutSecs))
+                return
+            end
+        end
+    end
 
     -- hold until reachable: forcecharm waits to be walked into range instead of spamming failed casts + target swaps each tick (scan picks are already filtered)
     local spawn = mq.TLO.Spawn(target)

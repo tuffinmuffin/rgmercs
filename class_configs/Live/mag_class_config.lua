@@ -1831,7 +1831,6 @@ _ClassConfig      = {
                 { name = "AllianceBuff",       cond = function(self) return Config:GetSetting('DoAlliance') end, },
                 { name = "GroupCotH", },
                 { name = "SingleCotH",         cond = function() return not Casting.CanUseAA('Call of the Hero') end, },
-                { name = "LongDurDmgShield", },
             },
         },
     },

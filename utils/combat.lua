@@ -872,7 +872,8 @@ function Combat.OkToEngagePreValidateId(targetId)
             return false
         else -- can't check HP yet, as we haven't targeted
             local distanceCheck = (Globals.ForceAssistRange and Globals.ForceTargetID > 0) or Targeting.GetTargetDistance(target) < Config:GetSetting('AssistRange')
-            local hostileCheck = Config:GetSetting('TargetNonAggressives') or target.Aggressive()
+            -- IsSpawnXTHater covers social-aggro mobs: EQ marks them auto hater in XTarget but Aggressive() (KOS flag) can be false
+            local hostileCheck = Config:GetSetting('TargetNonAggressives') or target.Aggressive() or Targeting.IsSpawnXTHater(targetId, true)
             local forcedTarget = Globals.ForceTargetID > 0 and target.ID() == Globals.ForceTargetID
             local forcedCombat = Globals.ForceCombatID > 0 and targetId == Globals.ForceCombatID
 
@@ -960,7 +961,8 @@ function Combat.OkToEngage(autoTargetId)
         else
             local distanceCheck = (Globals.ForceAssistRange and Globals.ForceTargetID > 0) or Targeting.GetTargetDistance() < Config:GetSetting('AssistRange')
             local assistHPCheck = Targeting.GetTargetPctHPs() <= Config:GetSetting('AutoAssistAt')
-            local hostileCheck = Config:GetSetting('TargetNonAggressives') or target.Aggressive()
+            -- IsSpawnXTHater covers social-aggro mobs: EQ marks them auto hater in XTarget but Aggressive() (KOS flag) can be false
+            local hostileCheck = Config:GetSetting('TargetNonAggressives') or target.Aggressive() or Targeting.IsSpawnXTHater(targetId, true)
             local forcedTarget = Globals.ForceTargetID > 0 and targetId == Globals.ForceTargetID
             local forcedCombat = Globals.ForceCombatID > 0 and targetId == Globals.ForceCombatID
 

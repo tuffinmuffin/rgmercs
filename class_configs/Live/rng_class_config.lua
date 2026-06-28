@@ -1442,6 +1442,11 @@ local _ClassConfig = {
                 name = "Kick",
                 type = "Ability",
             },
+            {
+                name = "Tracking",
+                type = "Ability",
+                cond = function(self) return Config:GetSetting('DoTrack') end,
+            },
         },
         ['DPS Buffs'] = {
             {
@@ -1909,6 +1914,14 @@ local _ClassConfig = {
             Category = "Self",
             Tooltip = "Use Aggro Reduction Buffs.",
             Default = true,
+        },
+        ['DoTrack']            = {
+            DisplayName = "Use Track",
+            Group = "Abilities",
+            Header = "Skills",
+            Category = "Utility",
+            Tooltip = "Use Track ability in the DPS rotation to level the skill. Disable once maxed.",
+            Default = false,
         },
         ['HealPriority']       = {
             DisplayName = "Healing Priority",

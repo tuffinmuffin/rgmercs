@@ -2831,8 +2831,8 @@ function Casting.GetLastCastResultId()
     return Globals.CastResult
 end
 
-local BLOCKED_RECHECK_SECS = 15  -- how often to re-verify the blocker is still present
-local BLOCKED_MAX_AGE_SECS = 300 -- hard expiry when we can't read the target's buffs at all
+local BLOCKED_RECHECK_SECS = 15   -- how often to re-verify the blocker is still present
+local BLOCKED_MAX_AGE_SECS = 1800 -- hard expiry when we can't read the target's buffs (30 min covers typical EQ buff durations)
 
 --- Best-effort check for whether buff `blocker` is currently on `target`.
 --- @param blocker string The name of the blocking buff (e.g. "Heroism").
@@ -2852,9 +2852,10 @@ function Casting.BlockerPresence(blocker, target)
     end
 
     -- DanNet peer: ask them directly whether they still have the blocker.
+    -- Use FindBuff["name X"] for prefix matching so "Alacrity" also matches "Alacrity Rk. II" etc.
     local peerName = mq.TLO.Spawn(tid).CleanName()
     if peerName and mq.TLO.DanNet(peerName)() then
-        local res = DanNet.query(peerName, string.format("Me.Buff[%s].ID", blocker), 1000)
+        local res = DanNet.query(peerName, string.format("Me.FindBuff[name %s].ID", blocker), 1000)
         if res ~= nil then
             return (tonumber(res) or 0) > 0, true
         end

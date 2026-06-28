@@ -840,18 +840,18 @@ local _ClassConfig = {
     ['RotationOrder']   = {
         -- Downtime doesn't have state because we run the whole rotation at once.
         {
+            name = 'PetSummon',
+            targetId = function(self) return { mq.TLO.Me.ID(), } end,
+            cond = function(self, combat_state)
+                return combat_state == "Downtime" and mq.TLO.Me.Pet.ID() == 0 and Casting.OkayToPetBuff() and Casting.AmIBuffable() and not Core.IsCharming()
+            end,
+        },
+        {
             name = 'Downtime',
             targetId = function(self) return { mq.TLO.Me.ID(), } end,
             cond = function(self, combat_state)
                 return combat_state == "Downtime" and
                     Casting.OkayToBuff() and Casting.AmIBuffable()
-            end,
-        },
-        {
-            name = 'PetSummon',
-            targetId = function(self) return { mq.TLO.Me.ID(), } end,
-            cond = function(self, combat_state)
-                return combat_state == "Downtime" and mq.TLO.Me.Pet.ID() == 0 and Casting.OkayToPetBuff() and Casting.AmIBuffable() and not Core.IsCharming()
             end,
         },
         { --Pet Buffs if we have one, timer because we don't need to constantly check this

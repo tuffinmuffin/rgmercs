@@ -362,6 +362,11 @@ return {
             "Mea's Protection",         -- Level 91
             "Neivr's Protection",       -- Level 86
         },
+        ['HasteBuff'] = {
+            -- Single target player haste - non-pet spells
+            "Celerity", -- Level 63
+            "Alacrity", -- Level 55
+        },
         ['PetHaste'] = {
             --Pet Haste*
             "Warder's Unity VI",      -- Level 129, combines haste and damage proc
@@ -703,17 +708,17 @@ return {
     ['RotationOrder']     = {
         -- Downtime doesn't have state because we run the whole rotation at once.
         {
-            name = 'Downtime',
-            targetId = function(self) return { mq.TLO.Me.ID(), } end,
-            cond = function(self, combat_state)
-                return combat_state == "Downtime" and Casting.OkayToBuff() and Casting.AmIBuffable()
-            end,
-        },
-        {
             name = 'PetSummon',
             targetId = function(self) return { mq.TLO.Me.ID(), } end,
             cond = function(self, combat_state)
                 return combat_state == "Downtime" and mq.TLO.Me.Pet.ID() == 0 and Casting.OkayToPetBuff() and Casting.AmIBuffable()
+            end,
+        },
+        {
+            name = 'Downtime',
+            targetId = function(self) return { mq.TLO.Me.ID(), } end,
+            cond = function(self, combat_state)
+                return combat_state == "Downtime" and Casting.OkayToBuff() and Casting.AmIBuffable()
             end,
         },
         {
@@ -1229,6 +1234,14 @@ return {
                 cond = function(self, spell, target)
                     -- Make sure this is gemmed due to long refresh, and only use the single target versions on classes that need it.
                     if ((spell.TargetType() or ""):lower() ~= "group v2" and not Targeting.TargetIsAMelee(target)) or not Casting.CastReady(spell) then return false end
+                    return Casting.GroupBuffCheck(spell, target)
+                end,
+            },
+            {
+                name = "HasteBuff",
+                type = "Spell",
+                cond = function(self, spell, target)
+                    if not Targeting.TargetIsAMelee(target) then return false end
                     return Casting.GroupBuffCheck(spell, target)
                 end,
             },

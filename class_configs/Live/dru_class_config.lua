@@ -1179,6 +1179,11 @@ local _ClassConfig = {
                     return Casting.OkayToNuke(true)
                 end,
             },
+            {
+                name = "Tracking",
+                type = "Ability",
+                cond = function(self) return Config:GetSetting('DoTrack') end,
+            },
         },
         ['Burn'] = {
             { --Chest Click, name function stops errors in rotation window when slot is empty
@@ -2032,6 +2037,14 @@ local _ClassConfig = {
             Max = 3,
             Tooltip = "When to yield offensive rotations for healing:\n1 - Ignore (never)\n2 - Big Heal Point\n3 - Main Heal Point",
             ConfigType = "Advanced",
+        },
+        ['DoTrack']      = {
+            DisplayName = "Use Track",
+            Group = "Abilities",
+            Header = "Skills",
+            Category = "Utility",
+            Tooltip = "Use Track ability in the DPS rotation to level the skill. Disable once maxed.",
+            Default = false,
         },
     },
 }

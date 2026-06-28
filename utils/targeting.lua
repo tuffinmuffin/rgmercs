@@ -610,29 +610,37 @@ function Targeting.IsSpawnFightingStranger(spawn, radius)
         for i = 1, count do
             local cur_spawn = mq.TLO.NearestSpawn(i, string.format("%s radius %d zradius %d", t, radius, radius))
 
-            if cur_spawn() and not Targeting.SafeTargetCache[cur_spawn.ID()] then
+            if cur_spawn() then
+                -- Only run the IsSafeName check when this player is actually assisting
+                -- the specific mob we're evaluating. Players not fighting this mob are
+                -- NOT cached — their AssistName can change between calls (e.g. they kill
+                -- mob A and start mob B), and caching them would cause us to miss that
+                -- they now hold the aggro lock on our next pull target.
                 if (cur_spawn.AssistName() or ""):len() > 0 then
                     Logger.log_verbose("My Interest: %s =? Their Interest: %s", spawn.CleanName(),
                         cur_spawn.AssistName())
                     if cur_spawn.AssistName() == spawn.Name() then
                         Logger.log_verbose("[%s] Fighting same mob as: %s Theirs: %s Ours: %s", t,
                             cur_spawn.CleanName(), cur_spawn.AssistName(), spawn.Name())
-                        local checkName = cur_spawn and cur_spawn() or cur_spawn.CleanName() or "None"
 
-                        if Targeting.TargetIsType("mercenary", cur_spawn) and cur_spawn.Owner() then checkName = cur_spawn.Owner.CleanName() end
-                        if Targeting.TargetIsType("pet", cur_spawn) then checkName = cur_spawn.Master.CleanName() end
+                        local spawnId = cur_spawn.ID()
+                        if Targeting.SafeTargetCache[spawnId] == nil then
+                            -- Cache whether this player is friendly — this is stable for
+                            -- the session (group/raid/guild membership doesn't change).
+                            local checkName = cur_spawn.CleanName() or "None"
+                            if Targeting.TargetIsType("mercenary", cur_spawn) and cur_spawn.Owner() then checkName = cur_spawn.Owner.CleanName() end
+                            if Targeting.TargetIsType("pet", cur_spawn) then checkName = cur_spawn.Master.CleanName() end
+                            Targeting.SafeTargetCache[spawnId] = Targeting.IsSafeName("pc", checkName)
+                        end
 
-                        if not Targeting.IsSafeName("pc", checkName) then
+                        if not Targeting.SafeTargetCache[spawnId] then
                             Logger.log_verbose(
-                                "\ar WARNING: \ax Almost attacked other PCs [%s] mob. Not attacking \aw%s\ax",
-                                checkName, cur_spawn.AssistName())
+                                "\ar WARNING: \ax Almost attacked other PCs mob. Not attacking \aw%s\ax",
+                                cur_spawn.AssistName())
                             return true
                         end
                     end
                 end
-
-                -- this is pretty expensive to calculate so lets cache it.
-                Targeting.SafeTargetCache[cur_spawn.ID()] = true
             end
         end
     end
