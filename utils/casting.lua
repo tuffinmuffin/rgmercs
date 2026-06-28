@@ -2032,8 +2032,11 @@ function Casting.UseSpell(spellName, targetId, bAllowMem, bAllowDead, retryCount
     })
     if Globals.StopCast then return false end
 
-    -- If the server blocked this buff (higher buff already present), remember it so we stop re-casting forever.
-    if Globals.CastResult == Globals.Constants.CastResults.CAST_TAKEHOLD and Globals.LastBlocker ~= "" then
+    -- If the server rejected this cast (higher buff present or other block), record it so we stop re-casting.
+    -- We do NOT require LastBlocker to be set: on classic/TLP servers the "(Blocked by X)" text may not appear
+    -- in the game message, so TakeHold1 never fires and LastBlocker stays "". RecordBlockedBuff handles
+    -- empty blocker via a 30-minute age-based timeout instead of a named-buff presence check.
+    if Globals.CastResult == Globals.Constants.CastResults.CAST_TAKEHOLD then
         Casting.RecordBlockedBuff(spell.ID(), targetId, Globals.LastBlocker)
     end
 
@@ -2879,8 +2882,9 @@ function Casting.RecordBlockedBuff(spellId, targetId, blocker)
         recordedAt = now,
         nextCheck = now + BLOCKED_RECHECK_SECS,
     }
-    Logger.log_info("\ay[BlockedBuff]\ax %s blocked on \ag%s\ax by '\ao%s\ax' - skipping until the blocker fades.",
-        mq.TLO.Spell(spellId).Name() or "?", mq.TLO.Spawn(targetId).CleanName() or ("ID:" .. targetId), blocker or "?")
+    local blockerDesc = (blocker and blocker ~= "") and ("by '\ao" .. blocker .. "\ax'") or "(blocker unknown - using timeout)"
+    Logger.log_info("\ay[BlockedBuff]\ax %s blocked on \ag%s\ax %s - skipping.",
+        mq.TLO.Spell(spellId).Name() or "?", mq.TLO.Spawn(targetId).CleanName() or ("ID:" .. targetId), blockerDesc)
 end
 
 --- Returns true if `spellId` should currently be skipped on `target` because it
