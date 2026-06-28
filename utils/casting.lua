@@ -2845,19 +2845,21 @@ function Casting.BlockerPresence(blocker, target)
     local tid = target.ID()
 
     if tid == mq.TLO.Me.ID() then
-        return mq.TLO.Me.FindBuff("name " .. blocker)() ~= nil, true
+        -- bare name arg to FindBuff does partial/prefix match: "Celerity" finds "Celerity Rk. III"
+        return mq.TLO.Me.FindBuff(blocker)() ~= nil, true
     end
     if tid == mq.TLO.Target.ID() then
-        return mq.TLO.Target.FindBuff("name " .. blocker)() ~= nil, true
+        return mq.TLO.Target.FindBuff(blocker)() ~= nil, true
     end
 
     -- DanNet peer: ask them directly whether they still have the blocker.
-    -- Use FindBuff["name X"] for prefix matching so "Alacrity" also matches "Alacrity Rk. II" etc.
+    -- Bare name arg prefix-matches: "Celerity" finds "Celerity Rk. III", etc.
+    -- The default stringification of FindBuff is the spell name or "NULL" if not found.
     local peerName = mq.TLO.Spawn(tid).CleanName()
     if peerName and mq.TLO.DanNet(peerName)() then
-        local res = DanNet.query(peerName, string.format("Me.FindBuff[name %s].ID", blocker), 1000)
+        local res = DanNet.query(peerName, string.format("Me.FindBuff[%s]", blocker), 1000)
         if res ~= nil then
-            return (tonumber(res) or 0) > 0, true
+            return res:lower() ~= "null", true
         end
     end
 
