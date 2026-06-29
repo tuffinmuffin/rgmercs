@@ -1413,6 +1413,13 @@ local _ClassConfig = {
                 cond = function(self, spell) return Casting.PetBuffCheck(spell) end,
             },
             {
+                name = "HasteBuff",
+                type = "Spell",
+                load_cond = function(self) return Config:GetSetting('DoHaste') end,
+                active_cond = function(self, spell) return mq.TLO.Me.PetBuff(spell.RankName())() ~= nil end,
+                cond = function(self, spell) return Casting.PetBuffCheck(spell) end,
+            },
+            {
                 name = "Companion's Aegis",
                 type = "AA",
                 cond = function(self, aaName)
