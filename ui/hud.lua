@@ -51,7 +51,7 @@ function HudUI:RenderToggleHud()
     ImGui.SetNextWindowSize(ImVec2(miniWidth, miniHeight), ImGuiCond.Always)
 
     local open, show = ImGui.Begin(Ui.GetWindowTitle("RGMercsHUD"), true,
-        bit32.bor(ImGuiWindowFlags.NoTitleBar, ImGuiWindowFlags.NoResize, ImGuiWindowFlags.NoFocusOnAppearing))
+        bit32.bor(ImGuiWindowFlags.NoTitleBar, ImGuiWindowFlags.NoResize))
     if not open then show = false end
     if show then
         local btnImg = Globals.LastBurnCheck and ImagesUI.burnImg or ImagesUI.derpImg

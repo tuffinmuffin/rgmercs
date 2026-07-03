@@ -4060,26 +4060,29 @@ function Ui.AnimatedTooltip(id, desc)
                 tip_pos = ImVec2(pos.x + canvas_size.x - tip_size.x, tip_pos.y)
             end
 
-            -- Get display bounds
-            local display_size = ImGui.GetWindowViewport().Size
+            -- Get display bounds (viewport may not be anchored at the desktop origin,
+            -- e.g. a windowed/tiled client on a secondary monitor)
+            local viewport     = ImGui.GetWindowViewport()
+            local display_min  = viewport.Pos
+            local display_max  = ImVec2(viewport.Pos.x + viewport.Size.x, viewport.Pos.y + viewport.Size.y)
             local margin = 4.0
 
             -- Clamp X to screen
-            if tip_pos.x < margin then
-                tip_pos = ImVec2(margin, tip_pos.y)
+            if tip_pos.x < display_min.x + margin then
+                tip_pos = ImVec2(display_min.x + margin, tip_pos.y)
             end
-            if tip_pos.x + tip_size.x > display_size.x - margin then
-                tip_pos = ImVec2(display_size.x - tip_size.x - margin, tip_pos.y)
+            if tip_pos.x + tip_size.x > display_max.x - margin then
+                tip_pos = ImVec2(display_max.x - tip_size.x - margin, tip_pos.y)
             end
 
             -- Clamp Y to screen (flip below item if tooltip would go off top)
-            if tip_pos.y < margin then
+            if tip_pos.y < display_min.y + margin then
                 -- Not enough space above, render below instead
                 local y_offset_below = hover_radius + 10 + (1.0 - ease_t) * 10.0
                 tip_pos = ImVec2(tip_pos.x, anchor.y + y_offset_below)
             end
-            if tip_pos.y + tip_size.y > display_size.y - margin then
-                tip_pos = ImVec2(tip_pos.x, display_size.y - tip_size.y - margin)
+            if tip_pos.y + tip_size.y > display_max.y - margin then
+                tip_pos = ImVec2(tip_pos.x, display_max.y - tip_size.y - margin)
             end
 
 
