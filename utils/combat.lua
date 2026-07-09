@@ -20,6 +20,7 @@ Combat.PullStuckTime = 0
 --- Returns the current live combat state based on XTarget hater count.
 ---@return string "Combat" if there are active haters, "Downtime" otherwise.
 function Combat.GetCombatState()
+    if Globals.ForceNormalMode then return "Downtime" end
     return Targeting.GetXTHaterCount(false) > 0 and "Combat" or "Downtime"
 end
 

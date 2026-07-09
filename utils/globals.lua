@@ -44,6 +44,7 @@ Globals.StopCast                      = false
 -- by the caster's post_activate and reset every class GiveTime so it never leaks.
 Globals.CastInterruptCheck            = nil
 Globals.BackOffFlag                   = false
+Globals.ForceNormalMode               = false -- /rgl forcenormal: treat XTarget hater count as 0 for state purposes, forcing Downtime so buffs/rotations run even with a stuck hater on XTarget
 Globals.RepositioningActive           = false
 Globals.RepositioningActiveSince      = 0
 Globals.InMedState                    = false

@@ -466,6 +466,22 @@ Binds.Handlers    = {
             Logger.log_info("\ayBackoff \awset to: %s", Strings.BoolToColorString(Globals.BackOffFlag))
         end,
     },
+    ['forcenormal'] = {
+        usage = "/rgl forcenormal <on|off>",
+        about =
+        "Toggles or sets a flag that ignores the XTarget hater count for Combat/Downtime state, forcing Downtime (buffs/rotations) even while a mob is stuck on XTarget. Does not stop engagement of a live target.",
+        handler = function(value)
+            if value == nil then
+                Globals.ForceNormalMode = not Globals.ForceNormalMode
+            elseif value:lower() == "on" or value == "1" then
+                Globals.ForceNormalMode = true
+            else
+                Globals.ForceNormalMode = false
+            end
+
+            Logger.log_info("\ayForce Normal Mode \awset to: %s", Strings.BoolToColorString(Globals.ForceNormalMode))
+        end,
+    },
     ['callassist'] = {
         usage = "/rgl callassist [group|raid] [now]",
         about =

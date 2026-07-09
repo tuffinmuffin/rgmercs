@@ -418,6 +418,9 @@ function StandardUI:RenderMainWindow(imgui_style, openGUI, flags)
                 if Globals.BackOffFlag then
                     pauseLabel = pauseLabel .. " [Backoff]"
                 end
+                if Globals.ForceNormalMode then
+                    pauseLabel = pauseLabel .. " [Forced Normal]"
+                end
 
                 local availableWidth = ImGui.GetContentRegionAvailVec().x
 
