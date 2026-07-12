@@ -1467,6 +1467,16 @@ _ClassConfig      = {
             },
         },
         ['DPS'] = {
+            { --OOM Chest Click, name function stops errors in rotation window when slot is empty
+                name_func = function() return mq.TLO.Me.Inventory("Chest").Name() or "ChestClick(Missing)" end,
+                type = "Item",
+                cond = function(self, itemName, target)
+                    if not Config:GetSetting('DoOOMChestClick') then return false end
+                    if mq.TLO.Me.PctMana() > Config:GetSetting('OOMChestClickPct') then return false end
+                    local clickySpell = Casting.GetClickySpell(itemName)
+                    return clickySpell and clickySpell() and not clickySpell.Beneficial()
+                end,
+            },
             {
                 name = "SwarmPet",
                 type = "Spell",
@@ -1971,6 +1981,24 @@ _ClassConfig      = {
             Category = "Class Config Clickies",
             Tooltip = "Click your chest item",
             Default = mq.TLO.MacroQuest.BuildName() ~= "Emu",
+        },
+        ['DoOOMChestClick'] = {
+            DisplayName = "Do OOM Chest Click",
+            Group = "Items",
+            Header = "Clickies",
+            Category = "Class Config Clickies",
+            Tooltip = "When at or below OOM Chest Click Mana %, click your chest item's offensive clicky (e.g. a DD) at your target as a mana-free damage option.",
+            Default = mq.TLO.MacroQuest.BuildName() ~= "Emu",
+        },
+        ['OOMChestClickPct'] = {
+            DisplayName = "OOM Chest Click Mana %",
+            Group = "Items",
+            Header = "Clickies",
+            Category = "Class Config Clickies",
+            Tooltip = "Mana percent at or below which to fire an offensive chest item clicky instead of casting spells.",
+            Default = 5,
+            Min = 1,
+            Max = 50,
         },
         ['DoMalo']         = {
             DisplayName = "Cast Malo",

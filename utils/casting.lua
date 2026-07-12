@@ -178,8 +178,9 @@ function Casting.SelfBuffAACheck(aaName, skipBlockCheck, skipTriggerCheck)
     return Casting.LocalBuffCheck(mq.TLO.Me.AltAbility(aaName).Spell.ID(), skipBlockCheck, skipTriggerCheck)
 end
 
---- Gets the clicky spell via GetClickySpell, then delegates to
---- LocalBuffCheck to confirm not blocked, not present, and stacks.
+--- Gets the clicky spell via GetClickySpell, rejects non-beneficial
+--- (e.g. DD/DoT) clickies, then delegates to LocalBuffCheck to confirm
+--- not blocked, not present, and stacks.
 ---@param itemName string The item name whose clicky to check.
 ---@param skipBlockCheck boolean|nil whether to skip the blocked-spell check
 ---@param skipTriggerCheck boolean|nil whether to skip the trigger check
@@ -187,6 +188,7 @@ end
 function Casting.SelfBuffItemCheck(itemName, skipBlockCheck, skipTriggerCheck)
     local clickySpell = Casting.GetClickySpell(itemName)
     if not (clickySpell and clickySpell()) then return false end
+    if not clickySpell.Beneficial() then return false end
     return Casting.LocalBuffCheck(clickySpell.ID(), skipBlockCheck, skipTriggerCheck)
 end
 
