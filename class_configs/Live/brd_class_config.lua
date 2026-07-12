@@ -148,6 +148,7 @@ local _ClassConfig = {
         },
         ['OverhasteSong'] = {            -- before effects are combined in aria
             "Warsong of the Vah Shir",   -- Level 60, SoL (overhaste only)
+            "Composition of Ervaj",      -- Level 60, Velious (overhaste only)
             "Battlecry of the Vah Shir", -- Level 52, SoL (overhaste only)
         },
         ['SpellDmgSong'] = {             -- before effects are combined in aria
