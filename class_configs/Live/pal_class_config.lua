@@ -265,6 +265,7 @@ local _ClassConfig = {
             "Ancient: Force of Jeron",    -- Level 70
             "Ancient: Force of Chaos",    -- Level 65
             "Force of Akera",             -- Level 53
+            "Holy Might",                 -- Level 42
             "Stun",                       -- Level 28
             "Desist",                     -- Level 13, - Not Timer 5, use for TLP Low Level Stun
         },
@@ -283,6 +284,7 @@ local _ClassConfig = {
             "Sacred Force",    -- Level 71
             "Force of Piety",  -- Level 66
             "Force of Akilae", -- Level 62
+            "Force",           -- Level 54, - Not Timer 4, use for TLP Low Level Stun
             "Cease",           -- Level 7, - Not Timer 4, use for TLP Low Level Stun
         },
         ['HealStun'] = {
@@ -330,6 +332,16 @@ local _ClassConfig = {
             "Guidance",                      -- Level 65
             "Blessing of Austerity",         -- Level 58, - Group
             "Austerity",                     -- Level 55
+            "Valor",                         -- Level 47
+            "Daring",                        -- Level 37
+            "Center",                        -- Level 20
+            "Courage",                       -- Level 8
+        },
+        ['ACBuff'] = {                -- Sometimes single, sometimes group, used on tank before Aego or until it is rolled into Unified (Symbol)
+            "Armor of Faith",         -- Level 48
+            "Guard",                  -- Level 39
+            "Spirit Armor",           -- Level 30
+            "Holy Armor",             -- Level 15
         },
         ['Brells'] = {
             "Brell's Mountainous Barrier XVI", -- Level 129
@@ -480,6 +492,10 @@ local _ClassConfig = {
             "Righteous Vexation",         -- Level 93
             "Righteous Indignation",      -- Level 88
             "Righteous Fury",             -- Level 80
+        },
+        ['DivineFavor'] = {
+            "Divine Favor", -- Level 55
+            "Divine Glory", -- Level 53
         },
         ['Symbol'] = {
             "Symbol of Thormir",              -- Level 122
@@ -676,6 +692,17 @@ local _ClassConfig = {
             "Night's Calming", -- Level 116
             "Relax",           -- Level 111
             "Hiatus",          -- Level 106
+        },
+        ['YaulpSpell'] = {
+            "Yaulp IX",
+            "Yaulp VIII",
+            "Yaulp VII",
+            "Yaulp VI",
+            "Yaulp V",   -- first rank with mana regen, Cleric config only lists V+
+            "Yaulp IV",
+            "Yaulp III",
+            "Yaulp II",
+            "Yaulp",
         },
         ['MeleeMit'] = {
             "Impede",    -- Level 128
@@ -1217,6 +1244,25 @@ local _ClassConfig = {
                 end,
             },
             {
+                name = "DivineFavor",
+                type = "Spell",
+                load_cond = function(self) return Config:GetSetting('DoDivineFavor') end,
+                active_cond = function(self, spell) return Casting.IHaveBuff(spell) end,
+                cond = function(self, spell, target)
+                    return Casting.GroupBuffCheck(spell, target)
+                end,
+            },
+            {
+                name = "ACBuff",
+                type = "Spell",
+                load_cond = function(self) return Config:GetSetting('DoACBuff') end,
+                active_cond = function(self, spell) return Casting.IHaveBuff(spell) end,
+                cond = function(self, spell, target)
+                    if (spell.TargetType() or ""):lower() == "single" and not Targeting.TargetIsATank(target) then return false end
+                    return Casting.GroupBuffCheck(spell, target)
+                end,
+            },
+            {
                 name = "Aego",
                 type = "Spell",
                 load_cond = function(self) return Config:GetSetting('AegoSymbol') == 1 end,
@@ -1700,6 +1746,14 @@ local _ClassConfig = {
                 load_cond = function(self) return Config:GetSetting('DoTwinHealNuke') end,
             },
             {
+                name = "YaulpSpell",
+                type = "Spell",
+                allowDead = true,
+                cond = function(self, spell)
+                    return not mq.TLO.Me.Mount() and Casting.SelfBuffCheck(spell)
+                end,
+            },
+            {
                 name = "Disruptive Persecution",
                 type = "AA",
                 cond = function(self, aaName, target)
@@ -1918,6 +1972,23 @@ local _ClassConfig = {
             Category = "Group",
             Tooltip = "Enable Casting Brells",
             Default = true,
+        },
+        ['DoDivineFavor']     = {
+            DisplayName = "Do Divine Favor",
+            Group = "Abilities",
+            Header = "Buffs",
+            Category = "Group",
+            Tooltip = "Enable Casting Divine Favor/Divine Glory",
+            Default = true,
+        },
+        ['DoACBuff']          = {
+            DisplayName = "Use AC Buff",
+            Group = "Abilities",
+            Header = "Buffs",
+            Category = "Group",
+            Tooltip = "Use your single-slot AC Buff on the Main Assist. Useful before Aego/Symbol are available at low level; " ..
+                "leaving this on otherwise is not likely to cause issues, but may cause unnecessary buff checking.",
+            Default = false,
         },
         ['AegoSymbol']        = {
             DisplayName = "Aego/Symbol Choice:",

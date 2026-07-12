@@ -155,6 +155,7 @@ return {
             "Ancient: Force of Jeron", -- Level 70
             "Ancient: Force of Chaos", -- Level 65
             "Force of Akera",          -- Level 53
+            "Holy Might",              -- Level 42
             "Stun",                    -- Level 28
             "Desist",                  -- Level 13 - Not Timer 5, filler
         },
