@@ -555,6 +555,13 @@ Binds.Handlers    = {
             Modules:ExecModule("Buffs", "AddUserSpell", name)
         end,
     },
+    ['procswap'] = {
+        usage = "/rgl procswap <toggle|list> [ruleName]",
+        about = "Toggle a ProcSwap rule on/off by name, or list current rules and their live status.",
+        handler = function(subcmd, ruleName)
+            Modules:ExecModule("ProcSwap", "HandleBindCommand", subcmd, ruleName)
+        end,
+    },
     ['forceassistrange'] = {
         usage = "/rgl forceassistrange <on|off>",
         about =
