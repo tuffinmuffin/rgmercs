@@ -2394,6 +2394,16 @@ function Casting.RunCastLoop(opts)
     local delay = castTime < floor and floor or castTime
 
     repeat
+        -- Re-verify the target before every attempt, not just the first: other rotation
+        -- logic (combat/heal/auto-target) can steal the live target during the delays
+        -- above/below a prior failed attempt, especially for real-player groupmates whose
+        -- buffs we can only check by target-swapping (no heartbeat/DanNet data for them).
+        -- Retrying blind against a hijacked target is what produces "must first target a
+        -- group member" chain-casting on group buffs.
+        if targetId and targetId > 0 and mq.TLO.Target.ID() ~= targetId then
+            Logger.log_debug("\ayRunCastLoop(): Target drifted before retrying %s - re-targeting %d.", actionName, targetId)
+            Targeting.SetTarget(targetId, true)
+        end
         Logger.log_verbose("\ayRunCastLoop(): Attempting to cast: %s", actionName)
         -- Active discs hold for discs to become active; other instants only hold until they go on cooldown.
         local isActiveDisc = castTime == 0 and Casting.IsActiveDisc(actionName)
