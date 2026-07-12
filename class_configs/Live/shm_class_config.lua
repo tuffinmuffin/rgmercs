@@ -1507,7 +1507,7 @@ local _ClassConfig = {
                 load_cond = function(self) return Config:GetSetting('DoHaste') and Casting.CanUseAA("Talisman of Celerity") and mq.TLO.Me.Level() < 111 end,
                 active_cond = function(self, aaName) return mq.TLO.Me.Haste() end,
                 cond = function(self, aaName, target)
-                    return Casting.GroupBuffAACheck(aaName, target)
+                    return Targeting.TargetIsAMelee(target) and Casting.GroupBuffAACheck(aaName, target)
                 end,
             },
             {
@@ -1516,7 +1516,7 @@ local _ClassConfig = {
                 load_cond = function(self) return Config:GetSetting('DoHaste') and not Casting.CanUseAA("Talisman of Celerity") end,
                 active_cond = function(self, aaName) return mq.TLO.Me.Haste() end,
                 cond = function(self, spell, target)
-                    return Casting.GroupBuffCheck(spell, target)
+                    return Targeting.TargetIsAMelee(target) and Casting.GroupBuffCheck(spell, target)
                 end,
             },
             {
