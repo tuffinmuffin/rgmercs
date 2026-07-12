@@ -4325,7 +4325,7 @@ function Ui.AnimatedButton(id, text, size, callbackFn)
     local btn_pos = cursor
 
     ImGui.SetCursorScreenPos(btn_pos)
-    ImGui.InvisibleButton('##btn_primary', size)
+    ImGui.InvisibleButton(id, size)
     hovered = ImGui.IsItemHovered()
     pressed = ImGui.IsItemClicked()
     local rounding = ImGui.GetStyle().FrameRounding

@@ -406,6 +406,28 @@ function StandardUI:RenderMainWindow(imgui_style, openGUI, flags)
 
                 self:RenderWindowControls()
 
+                local availableWidth = ImGui.GetContentRegionAvailVec().x
+                local forceNormalWidth = availableWidth / 6
+
+                ImGui.PushFont(ImGui.GetFont(), ImGui.GetFontSize() * 1.25)
+                ImGui.SetCursorPosX(ImGui.GetCursorPosX() + (availableWidth * .05) / 2)
+
+                if Globals.ForceNormalMode then
+                    ImGui.PushStyleColor(ImGuiCol.Button, Globals.Constants.Colors.MainButtonUnpausedColor)
+                    ImGui.PushStyleColor(ImGuiCol.ButtonHovered, Ui.ImVec4ToColor(Globals.Constants.Colors.MainButtonUnpausedColor))
+                else
+                    ImGui.PushStyleColor(ImGuiCol.Button, Globals.Constants.Colors.ConditionDisabledColor)
+                    ImGui.PushStyleColor(ImGuiCol.ButtonHovered, Ui.ImVec4ToColor(Globals.Constants.Colors.ConditionDisabledColor))
+                end
+                if Ui.AnimatedButton("##forcenormalbutton", "Normal", ImVec2(forceNormalWidth, 40)) then
+                    Globals.ForceNormalMode = not Globals.ForceNormalMode
+                end
+                Ui.Tooltip(
+                    "Force Normal Mode: ignores XTarget hater count and forces Downtime state so buffs/rotations run even while a mob is stuck on XTarget (e.g. raid encounter mechanics). Same as /rgl forcenormal.")
+                ImGui.PopStyleColor(2)
+
+                ImGui.SameLine()
+
                 if not Globals.PauseMain then
                     ImGui.PushStyleColor(ImGuiCol.Button, Globals.Constants.Colors.MainButtonUnpausedColor)
                     ImGui.PushStyleColor(ImGuiCol.ButtonHovered, Ui.ImVec4ToColor(Globals.Constants.Colors.MainButtonUnpausedColor))
@@ -418,15 +440,8 @@ function StandardUI:RenderMainWindow(imgui_style, openGUI, flags)
                 if Globals.BackOffFlag then
                     pauseLabel = pauseLabel .. " [Backoff]"
                 end
-                if Globals.ForceNormalMode then
-                    pauseLabel = pauseLabel .. " [Forced Normal]"
-                end
 
-                local availableWidth = ImGui.GetContentRegionAvailVec().x
-
-                ImGui.PushFont(ImGui.GetFont(), ImGui.GetFontSize() * 1.25)
-                ImGui.SetCursorPosX(ImGui.GetCursorPosX() + (availableWidth * .05) / 2)
-                if Ui.AnimatedButton("##mercsmainbutton", pauseLabel, ImVec2(availableWidth * .95, 40)) then
+                if Ui.AnimatedButton("##mercsmainbutton", pauseLabel, ImVec2(availableWidth * .95 - forceNormalWidth, 40)) then
                     Globals.PauseMain = not Globals.PauseMain
                 end
                 ImGui.PopFont()
