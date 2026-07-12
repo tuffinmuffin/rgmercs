@@ -343,14 +343,11 @@ function Module:Enqueue(spellName, targetId, label, group, ignoreMana)
     })
 end
 
---- Enqueue a group buff. groupNum nil = all groups. Group v2 (PBAE) only ever
---- affects the caster's own group -> a single self-targeted cast.
+--- Enqueue a group buff. groupNum nil = all groups. Targets the requested
+--- group's anchor member same as any other group buff -- some "Group v2"
+--- spells still land on the targeted player's group on this server, so we
+--- don't force a self-only cast just because MQ reports the v2 TargetType.
 function Module:EnqueueGroupBuff(entry, groupNum, ignoreMana)
-    if entry.v2 then
-        self:Enqueue(entry.key, mq.TLO.Me.ID() or 0, entry.name .. " (Caster Group)", nil, ignoreMana)
-        return
-    end
-
     if groupNum == nil then
         for _, gn in ipairs(self:RosterGroupNums()) do
             local g = self.TempSettings.Roster.groups[gn]
@@ -442,8 +439,13 @@ function Module:ProcessQueue()
         return
     end
 
+    -- Call UseSpell directly with retryCount=0 instead of routing through "/rgl cast":
+    -- that command enters class.lua's QueuedAbilities system, which retries failed casts
+    -- up to 3 more times on its own, each of which can retry again inside RunCastLoop --
+    -- turning one job here into many real cast attempts against the same target. This
+    -- module is fire-once, no buff-status recheck, by design.
     Targeting.SetTarget(job.targetId, true)
-    Core.DoCmd('/rgl cast "%s" %d', job.spellName, job.targetId)
+    Casting.UseSpell(job.spellName, job.targetId, true, false, 0)
     self.TempSettings.LastCastClock = mq.gettime()
     table.remove(self.TempSettings.Queue, 1)
 end
@@ -692,31 +694,18 @@ function Module:RenderBuffRow(bucketName, entry, isGroup)
 
     if bucketName == "group" then
         ImGui.SameLine()
-        if entry.v2 then
-            if ImGui.SmallButton("Caster Group##v2_" .. entry.key) then
-                self:EnqueueGroupBuff(entry, nil)
-            end
-            if ImGui.IsItemHovered() then
-                Ui.MultilineTooltipWithColors({
-                    { text = "Group v2 (PBAE) - only buffs YOUR group regardless of target.", color = Globals.Constants.Colors.ConditionFailColor, },
-                })
-            end
-            -- Disabled per-group buttons to make the limitation visible.
-            ImGui.BeginDisabled()
-            for _, gn in ipairs(self:RosterGroupNums()) do
-                ImGui.SameLine()
-                ImGui.SmallButton(string.format("G%d##v2dis_%s", gn, entry.key))
-            end
-            ImGui.EndDisabled()
-        else
-            if ImGui.SmallButton("All Groups##all_" .. entry.key) then
-                self:EnqueueGroupBuff(entry, nil)
-            end
-            for _, gn in ipairs(self:RosterGroupNums()) do
-                ImGui.SameLine()
-                if ImGui.SmallButton(string.format("G%d##g%d_%s", gn, gn, entry.key)) then
-                    self:EnqueueGroupBuff(entry, gn)
-                end
+        if ImGui.SmallButton("All Groups##all_" .. entry.key) then
+            self:EnqueueGroupBuff(entry, nil)
+        end
+        if entry.v2 and ImGui.IsItemHovered() then
+            Ui.MultilineTooltipWithColors({
+                { text = "MQ reports this as Group v2 (PBAE). If it only lands on your own group here, target that group's anchor and use its G# button instead of All Groups.", color = Globals.Constants.Colors.FAQDescColor, },
+            })
+        end
+        for _, gn in ipairs(self:RosterGroupNums()) do
+            ImGui.SameLine()
+            if ImGui.SmallButton(string.format("G%d##g%d_%s", gn, gn, entry.key)) then
+                self:EnqueueGroupBuff(entry, gn)
             end
         end
     elseif bucketName == "single" then
