@@ -113,6 +113,24 @@ function StandardUI:renderModulesTabs()
                 ImGui.Unindent()
             end
 
+            if ImGui.CollapsingHeader("Rez Priority Names") then
+                ImGui.Indent()
+                Ui.RenderTextList("RezPriorityNames", false)
+                ImGui.Unindent()
+            end
+
+            if ImGui.CollapsingHeader("Rez Block List") then
+                ImGui.Indent()
+                Ui.RenderTextList("RezBlockList", false)
+                ImGui.Unindent()
+            end
+
+            if ImGui.CollapsingHeader("Rez Skip Classes") then
+                ImGui.Indent()
+                Ui.RenderTextList("RezSkipClasses", false)
+                ImGui.Unindent()
+            end
+
             if not Config:GetSetting('PopOutForceTarget') then
                 if ImGui.CollapsingHeader("Force Target") then
                     ImGui.Indent()

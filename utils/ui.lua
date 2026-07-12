@@ -375,6 +375,91 @@ function Ui.RenderList(listName, ordered)
     end
 end
 
+-- Stores per-list text input state between frames
+local TextListInputs = {}
+
+--- Like RenderList but with a text input for adding arbitrary entries (e.g. class names).
+--- Renders a Use toggle, a text-input + Add button, and a simple table of entries with delete.
+function Ui.RenderTextList(listName, ordered)
+    if not listName then return end
+
+    local useKey     = "Use" .. listName
+    local displayName = listName:gsub("List", " List"):gsub("Classes", " Classes"):gsub("Names", " Names")
+    local listData   = Config:GetSetting(listName) or {}
+
+    -- Use toggle
+    if Config:GetSetting(useKey) then
+        ImGui.PushStyleColor(ImGuiCol.Button, Globals.Constants.Colors.ConditionPassColor)
+    else
+        ImGui.PushStyleColor(ImGuiCol.Button, Globals.Constants.Colors.ConditionFailColor)
+    end
+    ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, ImVec2(20, 3))
+    if ImGui.SmallButton(Config:GetSetting(useKey) and ("Use " .. displayName .. ": Enabled") or ("Use " .. displayName .. ": Disabled")) then
+        Config:SetSetting(useKey, not Config:GetSetting(useKey))
+    end
+    ImGui.PopStyleVar()
+    ImGui.PopStyleColor()
+
+    -- Text input + Add button
+    TextListInputs[listName] = TextListInputs[listName] or ""
+    ImGui.PushID("##_textinput_" .. listName)
+    ImGui.SetNextItemWidth(120)
+    local newText, changed = ImGui.InputText("##input", TextListInputs[listName])
+    if changed then TextListInputs[listName] = newText end
+    ImGui.PopID()
+    ImGui.SameLine()
+    if ImGui.SmallButton("Add##" .. listName) then
+        local entry = TextListInputs[listName]:match("^%s*(.-)%s*$") -- trim whitespace
+        if entry ~= "" then
+            Config:ListAdd(entry, listName)
+            TextListInputs[listName] = ""
+        end
+    end
+
+    -- Entry table (simpler than RenderList — no PC lookup columns)
+    local tableId = listName .. " Entries"
+    local controlsWidth = ordered and 80.0 or 30.0
+    if ImGui.BeginTable(tableId, 3, bit32.bor(ImGuiTableFlags.Borders, ImGuiTableFlags.RowBg)) then
+        ImGui.TableSetupColumn('ID',       ImGuiTableColumnFlags.WidthFixed,   20.0)
+        ImGui.TableSetupColumn('Value',    ImGuiTableColumnFlags.WidthStretch, 140.0)
+        ImGui.TableSetupColumn('Controls', ImGuiTableColumnFlags.WidthFixed,   controlsWidth)
+        ImGui.TableHeadersRow()
+
+        for idx, entry in ipairs(listData) do
+            ImGui.TableNextColumn()
+            Ui.RenderText(tostring(idx))
+            ImGui.TableNextColumn()
+            Ui.RenderText(entry)
+            ImGui.TableNextColumn()
+            local deleteId = "##_small_btn_delete_" .. listName .. "_" .. tostring(idx)
+            ImGui.PushID(deleteId)
+            if ImGui.SmallButton(Icons.FA_TRASH) then
+                Config:ListDelete(idx, listName)
+            end
+            ImGui.PopID()
+            if ordered then
+                ImGui.SameLine()
+                ImGui.PushID("##_small_btn_up_" .. listName .. "_" .. tostring(idx))
+                if idx == 1 then
+                    ImGui.InvisibleButton(Icons.FA_CHEVRON_UP, ImVec2(22, 1))
+                else
+                    if ImGui.SmallButton(Icons.FA_CHEVRON_UP) then Config:ListMoveUp(idx, listName) end
+                end
+                ImGui.PopID()
+                ImGui.SameLine()
+                ImGui.PushID("##_small_btn_dn_" .. listName .. "_" .. tostring(idx))
+                if idx == #listData then
+                    ImGui.InvisibleButton(Icons.FA_CHEVRON_DOWN, ImVec2(22, 1))
+                else
+                    if ImGui.SmallButton(Icons.FA_CHEVRON_DOWN) then Config:ListMoveDown(idx, listName) end
+                end
+                ImGui.PopID()
+            end
+        end
+        ImGui.EndTable()
+    end
+end
+
 --- Friendly labels and the enable-setting for each assist source key.
 local AssistSourceMeta = {
     ['AssistList'] = { label = "Assist List", enable = "UseAssistList", },

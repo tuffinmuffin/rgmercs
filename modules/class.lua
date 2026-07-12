@@ -49,6 +49,7 @@ Module.TempSettings.HealRotationTable        = {}
 Module.TempSettings.RotationTimers           = {}
 Module.TempSettings.RezTimers                = {}
 Module.TempSettings.RezAbilities             = nil
+Module.TempSettings.RezInterruptTimer        = 0
 Module.TempSettings.CureCheckTimer           = Globals.GetTimeSeconds() -- set this out a bit so we have time to get actor data.
 Module.TempSettings.ResolvingActions         = true
 Module.TempSettings.CombatModeSet            = false
@@ -1493,15 +1494,20 @@ function Module:HealById(id)
     end
 end
 
-function Module:RunHealRotation()
-    Logger.log_verbose("\ao[Heals] Checking for injured friends...")
-    self:HealById(Combat.FindWorstHurtGroupMember(Config:GetSetting('MaxHealPoint')))
+function Module:RunHealRotation(hpThreshold)
+    local threshold = hpThreshold or Config:GetSetting('MaxHealPoint')
+    Logger.log_verbose("\ao[Heals] Checking for injured friends (threshold: %d)...", threshold)
+    self:HealById(Combat.FindWorstHurtGroupMember(threshold))
 
     if Config:GetSetting('UseHealList') then
-        self:HealById(Combat.FindWorstHurtHealList(Config:GetSetting('MaxHealPoint')))
+        self:HealById(Combat.FindWorstHurtHealList(threshold))
     else
-        self:HealById(Combat.FindWorstHurtXT(Config:GetSetting('MaxHealPoint')))
+        self:HealById(Combat.FindWorstHurtXT(threshold))
     end
+end
+
+function Module:RunRezChecks(combat_state)
+    self:CheckAndRez(combat_state)
 end
 
 --- True if anyone we heal (group/pets + heal list or XT) is below the gate threshold this frame.
@@ -2222,20 +2228,49 @@ function Module:TryRez(corpseId, ownerName)
 end
 
 -- one enumeration of every nearby PC corpse, partitioned into self / in-group / out-of-group (OOG gated here)
+-- true if ownerName/classShort is blocked outright by the user's Rez Block List / Rez Skip Classes
+local function isRezBlocked(ownerName, classShort)
+    if Config:GetSetting('UseRezBlockList') then
+        for _, name in ipairs(Config:GetSetting('RezBlockList') or {}) do
+            if ownerName == name then return true end
+        end
+    end
+    if Config:GetSetting('UseRezSkipClasses') then
+        for _, cls in ipairs(Config:GetSetting('RezSkipClasses') or {}) do
+            if classShort == cls then return true end
+        end
+    end
+    return false
+end
+
+-- true if ownerName is on the user's Rez Priority Names list (rezzed ahead of role priority)
+local function isRezPriorityName(ownerName)
+    if not Config:GetSetting('UseRezPriorityNames') then return false end
+    for _, name in ipairs(Config:GetSetting('RezPriorityNames') or {}) do
+        if ownerName == name then return true end
+    end
+    return false
+end
+
 function Module:CheckAndRez(combat_state)
     local rezOutside = Config:GetSetting('RezOutside')
     local myName = mq.TLO.Me.DisplayName()
     local corpses = {}
-    local search = "pccorpse radius 100 zradius 50"
+    local search = string.format("pccorpse radius %d zradius 100", Config:GetSetting('RezRange'))
     local count = mq.TLO.SpawnCount(search)()
     for i = 1, count do
         local spawn = mq.TLO.NearestSpawn(i, search)
         if spawn and spawn() then
             local ownerName = (spawn.CleanName() or ""):gsub("'s corpse$", "")
+            local classShort = spawn.Class.ShortName() or ""
             local isSelf = ownerName == myName
             local keep = isSelf or mq.TLO.Group.Member(ownerName)() ~= nil
             if not keep then
                 keep = rezOutside and Targeting.IsSafeName("pc", spawn.DisplayName())
+            end
+            if keep and isRezBlocked(ownerName, classShort) then
+                Logger.log_debug("\atCheckAndRez(): Skipping %s — blocked or skip-class.", ownerName)
+                keep = false
             end
             if keep then
                 table.insert(corpses, {
@@ -2243,28 +2278,27 @@ function Module:CheckAndRez(combat_state)
                     ownerName  = ownerName,
                     isSelf     = isSelf,
                     distance   = spawn.Distance() or 999,
-                    classShort = spawn.Class.ShortName() or "",
+                    classShort = classShort,
+                    priority   = isRezPriorityName(ownerName),
                 })
             end
         end
     end
 
-    -- priority-tier sort (role tier first, distance second); None falls back to plain nearest-first
+    -- priority sort: named priority first, then role tier (healer/tank), then distance; None falls back to plain nearest-first
     local rolePriority = Config:GetSetting('RezRolePriority') or 4
-    if rolePriority > 1 then
-        local function isPriorityCorpse(corpseClass)
-            if rolePriority == 2 then return Globals.Constants.RGHealer:contains(corpseClass) end
-            if rolePriority == 3 then return Globals.Constants.RGTank:contains(corpseClass) end
-            return Globals.Constants.RGHealer:contains(corpseClass) or Globals.Constants.RGTank:contains(corpseClass)
-        end
-        table.sort(corpses, function(a, b)
-            local aPriority, bPriority = isPriorityCorpse(a.classShort), isPriorityCorpse(b.classShort)
-            if aPriority ~= bPriority then return aPriority end
-            return a.distance < b.distance
-        end)
-    else
-        table.sort(corpses, function(a, b) return a.distance < b.distance end)
+    local function isRoleCorpse(corpseClass)
+        if rolePriority <= 1 then return false end
+        if rolePriority == 2 then return Globals.Constants.RGHealer:contains(corpseClass) end
+        if rolePriority == 3 then return Globals.Constants.RGTank:contains(corpseClass) end
+        return Globals.Constants.RGHealer:contains(corpseClass) or Globals.Constants.RGTank:contains(corpseClass)
     end
+    table.sort(corpses, function(a, b)
+        if a.priority ~= b.priority then return a.priority end
+        local aRole, bRole = isRoleCorpse(a.classShort), isRoleCorpse(b.classShort)
+        if aRole ~= bRole then return aRole end
+        return a.distance < b.distance
+    end)
 
     local rezInZonePC = Config:GetSetting('RezInZonePC')
     local retryRezDelay = Config:GetSetting('RetryRezDelay')
@@ -2284,7 +2318,7 @@ function Module:CheckAndRez(combat_state)
     end
 
     -- EMU: clear the already-rezzed set once corpses despawn, so a recycled spawn id isn't treated as rezzed
-    if Core.OnEMU() and mq.TLO.SpawnCount("pccorpse radius 150 zradius 50")() == 0 then
+    if Core.OnEMU() and mq.TLO.SpawnCount("pccorpse radius 150 zradius 100")() == 0 then
         Globals.RezzedCorpses = {}
         Globals.CorpseConned = false
         Casting.RezConsiderCache = {}
@@ -2352,16 +2386,34 @@ function Module:GiveTime()
         return
     end
 
-    -- Healing happens first and anytime we aren't in downtime while invis and set not to break it.
-    if self:IsHealing() then
-        if not (combat_state == "Downtime" and mq.TLO.Me.Invis() and not Config:GetSetting('BreakInvisForHealing')) then
-            self:RunHealRotation()
+    local rezMode    = Config:GetSetting('RezMode')  -- 1=Heal First, 2=Rez First, 3=Timed Interrupt
+    local doRez      = (self:IsRezing() or self:HasRezClickies()) and Config:GetSetting('DoRez') and Core.OkayToNotHeal(2)
+    local invisBlock = combat_state == "Downtime" and mq.TLO.Me.Invis() and not Config:GetSetting('BreakInvisForHealing')
+
+    -- Timed Interrupt: check if the interval has elapsed this tick
+    local timedRezFired = false
+    if rezMode == 3 and doRez and not invisBlock then
+        if (Globals.GetTimeSeconds() - self.TempSettings.RezInterruptTimer) >= Config:GetSetting('RezInterruptInterval') then
+            timedRezFired = true
+            self.TempSettings.RezInterruptTimer = Globals.GetTimeSeconds()
         end
     end
 
-    if (self:IsRezing() or self:HasRezClickies()) and Config:GetSetting('DoRez') and Core.OkayToNotHeal(2) then
-        if not (combat_state == "Downtime" and mq.TLO.Me.Invis() and not Config:GetSetting('BreakInvisForHealing')) then
-            self:CheckAndRez(combat_state)
+    -- Rez First: rez before heals
+    if rezMode == 2 and doRez and not invisBlock then
+        self:RunRezChecks(combat_state)
+    end
+
+    -- Heal rotation (Rez First uses the emergency HP threshold instead of MaxHealPoint)
+    if self:IsHealing() and not invisBlock then
+        local threshold = (rezMode == 2) and Config:GetSetting('RezModeHealPct') or nil
+        self:RunHealRotation(threshold)
+    end
+
+    -- Heal First (default): rez after heals. Timed Interrupt: rez only when timer fires.
+    if not invisBlock and doRez then
+        if rezMode == 1 or (rezMode == 3 and timedRezFired) then
+            self:RunRezChecks(combat_state)
         end
     end
 
