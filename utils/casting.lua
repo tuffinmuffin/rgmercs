@@ -396,6 +396,26 @@ function Casting.AddedBuffCheck(spellId, target)
     return Casting.ResolveBuffCheck(spellId, target, true, true)
 end
 
+--- Checks whether the target already has any spell from a name list, by exact-ID presence via the
+--- existing multi-path buff resolution (self/pet/DanNet peer/actor heartbeat/raw target).
+--- Used to stop classes with overlapping buff lines (e.g. SHM's Spirit of Wolf line vs DRU's Pack
+--- Spirit line -- same effect, different spell IDs) from repeatedly overwriting each other's buff:
+--- one class's cast displaces the other's, which makes the displaced class recast, which displaces
+--- the first one's, forever. Deferring to whichever one already landed breaks that loop.
+---@param nameList string[] Spell names belonging to the other class's version of this buff.
+---@param target MQTarget|MQSpawn|MQCharacter? The target to check.
+---@return boolean True if the target already has one of these spells, so our own cast should be skipped.
+function Casting.TargetHasAnyNamedBuff(nameList, target)
+    if not (target and target()) then return false end
+    for _, name in ipairs(nameList) do
+        local spell = mq.TLO.Spell(name)
+        if spell() and not Casting.AddedBuffCheck(spell.ID(), target) then
+            return true
+        end
+    end
+    return false
+end
+
 --- Resolves spell rank via GetUseableSpellId, then delegates to
 --- ResolveBuffCheck which picks the best method (local, pet, actor
 --- heartbeat, DanNet peer, or target-change) based on the target.

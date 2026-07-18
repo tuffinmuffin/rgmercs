@@ -1562,6 +1562,12 @@ local _ClassConfig = {
                 -- We get Tala'tak at 74, but Lupine Spirit doesn't use it until 90. Check Ranks.
                 load_cond = function(self) return Config:GetSetting('DoRunSpeed') and (mq.TLO.Me.AltAbility("Lupine Spirit").Rank() or -1) < 4 end,
                 cond = function(self, spell, target)
+                    -- Druid's Pack Spirit line is the same run-speed effect on a different spell ID. If a target
+                    -- already has it, casting our own here would overwrite it and trigger the Druid to recast,
+                    -- which then overwrites ours -- an endless buff ping-pong. Defer to whichever already landed.
+                    if Casting.TargetHasAnyNamedBuff({ "Flight of Falcons", "Spirit of Falcons", "Flight of Eagles", "Spirit of Eagle", "Pack Spirit", }, target) then
+                        return false
+                    end
                     return Casting.GroupBuffCheck(spell, target)
                 end,
             },
